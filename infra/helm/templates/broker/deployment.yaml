@@ -1,0 +1,84 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: broker
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: broker
+    component: broker
+spec:
+  replicas: {{ .Values.broker.replicas }}
+  selector:
+    matchLabels:
+      app: broker
+  template:
+    metadata:
+      labels:
+        app: broker
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "{{ .Values.broker.port }}"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: {{ .Values.serviceAccount.name }}
+      initContainers:
+        - name: run-migrations
+          image: "{{ .Values.image.registry }}/{{ .Values.broker.image }}:{{ .Values.broker.tag }}"
+          command: ["alembic", "upgrade", "head"]
+          env:
+            - name: SYNC_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: broker-postgres-secret
+                  key: sync_url
+      containers:
+        - name: broker
+          image: "{{ .Values.image.registry }}/{{ .Values.broker.image }}:{{ .Values.broker.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.broker.port }}
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: broker-postgres-secret
+                  key: async_url
+            - name: SYNC_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: broker-postgres-secret
+                  key: sync_url
+            - name: REDIS_URL
+              value: "redis://{{ .Values.redis.host }}:{{ .Values.redis.port }}/0"
+            - name: CELERY_BROKER_URL
+              value: "redis://{{ .Values.redis.host }}:{{ .Values.redis.port }}/1"
+            - name: CELERY_RESULT_BACKEND
+              value: "redis://{{ .Values.redis.host }}:{{ .Values.redis.port }}/2"
+            - name: CONTROL_PLANE_URL
+              value: "http://control-plane:{{ .Values.controlPlane.port }}"
+          resources:
+            {{- toYaml .Values.broker.resources | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.broker.port }}
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.broker.port }}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: broker
+  namespace: {{ .Values.namespace }}
+spec:
+  selector:
+    app: broker
+  ports:
+    - port: {{ .Values.broker.port }}
+      targetPort: {{ .Values.broker.port }}

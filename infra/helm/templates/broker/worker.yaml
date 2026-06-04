@@ -1,0 +1,67 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: worker
+spec:
+  replicas: {{ .Values.worker.replicas }}
+  selector:
+    matchLabels:
+      app: worker
+  template:
+    metadata:
+      labels:
+        app: worker
+    spec:
+      serviceAccountName: {{ .Values.serviceAccount.name }}
+      containers:
+        - name: worker
+          image: "{{ .Values.image.registry }}/{{ .Values.worker.image }}:{{ .Values.worker.tag }}"
+          command:
+            - celery
+            - -A
+            - app.workers.celery_app
+            - worker
+            - --loglevel=info
+            - --concurrency={{ .Values.worker.concurrency }}
+          env:
+            - name: SYNC_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: broker-postgres-secret
+                  key: sync_url
+            - name: REDIS_URL
+              value: "redis://{{ .Values.redis.host }}:{{ .Values.redis.port }}/0"
+            - name: CELERY_BROKER_URL
+              value: "redis://{{ .Values.redis.host }}:{{ .Values.redis.port }}/1"
+            - name: CELERY_RESULT_BACKEND
+              value: "redis://{{ .Values.redis.host }}:{{ .Values.redis.port }}/2"
+            - name: CONTROL_PLANE_URL
+              value: "http://control-plane:{{ .Values.controlPlane.port }}"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: celery-beat
+  namespace: {{ .Values.namespace }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: celery-beat
+  template:
+    metadata:
+      labels:
+        app: celery-beat
+    spec:
+      containers:
+        - name: celery-beat
+          image: "{{ .Values.image.registry }}/{{ .Values.worker.image }}:{{ .Values.worker.tag }}"
+          command: ["celery", "-A", "app.workers.celery_app", "beat", "--loglevel=info"]
+          env:
+            - name: CELERY_BROKER_URL
+              value: "redis://{{ .Values.redis.host }}:{{ .Values.redis.port }}/1"
+            - name: CELERY_RESULT_BACKEND
+              value: "redis://{{ .Values.redis.host }}:{{ .Values.redis.port }}/2"

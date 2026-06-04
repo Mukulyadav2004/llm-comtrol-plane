@@ -1,0 +1,84 @@
+replicaCount: 1
+namespace: llm-control-plane
+
+image:
+  registry: ""  # e.g. ghcr.io/your-org
+  pullPolicy: IfNotPresent
+
+broker:
+  image: llm-control-plane/broker
+  tag: latest
+  port: 8000
+  replicas: 2
+  resources:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+worker:
+  image: llm-control-plane/broker
+  tag: latest
+  replicas: 2
+  concurrency: 4
+
+controlPlane:
+  image: llm-control-plane/control-plane
+  tag: latest
+  port: 8001
+  replicas: 1
+
+gateway:
+  image: llm-control-plane/gateway
+  tag: latest
+  port: 8002
+  replicas: 3
+  resources:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 512Mi
+
+mcpRegistry:
+  image: llm-control-plane/mcp-registry
+  tag: latest
+  port: 8003
+  replicas: 1
+
+postgres:
+  enabled: true
+  host: postgres
+  port: 5432
+  database: broker_db
+  user: broker
+  existingSecret: broker-postgres-secret
+  passwordKey: password
+
+redis:
+  enabled: true
+  host: redis
+  port: 6379
+
+ollama:
+  enabled: true
+  host: ollama
+  port: 11434
+  defaultModel: llama3.2:1b
+
+ingress:
+  enabled: false
+  className: nginx
+  host: llm-gateway.example.com
+  tls: []
+
+serviceAccount:
+  create: true
+  name: llm-control-plane
+
+monitoring:
+  enabled: true
+  serviceMonitor: false  # set true if Prometheus Operator is installed

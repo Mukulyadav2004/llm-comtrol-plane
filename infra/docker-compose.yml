@@ -1,0 +1,224 @@
+version: "3.9"
+
+x-common-env: &common-env
+  PYTHONUNBUFFERED: "1"
+
+services:
+  # ─────────────────────────────────────────────
+  # Infrastructure
+  # ─────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: broker
+      POSTGRES_PASSWORD: broker
+      POSTGRES_DB: broker_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U broker"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    ports:
+      - "5432:5432"
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    ports:
+      - "6379:6379"
+
+  ollama:
+    image: ollama/ollama:latest
+    volumes:
+      - ollama_data:/root/.ollama
+    ports:
+      - "11434:11434"
+    # Pull a default model on first start
+    entrypoint: ["/bin/sh", "-c", "ollama serve & sleep 5 && ollama pull llama3.2:1b && wait"]
+
+  # ─────────────────────────────────────────────
+  # Observability
+  # ─────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    command: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.retention.time=7d"]
+
+  grafana:
+    image: grafana/grafana:latest
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      # Show a "Sign up" link on the login page and let new users self-register
+      GF_USERS_ALLOW_SIGN_UP: "true"
+      # New self-registered users land in the default org as Editors (no email/SMTP needed)
+      GF_USERS_AUTO_ASSIGN_ORG: "true"
+      GF_USERS_AUTO_ASSIGN_ORG_ROLE: Editor
+    volumes:
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+
+  # ─────────────────────────────────────────────
+  # Application services
+  # ─────────────────────────────────────────────
+  migrate:
+    build:
+      context: ../services/broker
+    environment:
+      <<: *common-env
+      DATABASE_URL: postgresql+asyncpg://broker:broker@postgres:5432/broker_db
+      SYNC_DATABASE_URL: postgresql://broker:broker@postgres:5432/broker_db
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  broker:
+    build:
+      context: ../services/broker
+    environment:
+      <<: *common-env
+      DATABASE_URL: postgresql+asyncpg://broker:broker@postgres:5432/broker_db
+      SYNC_DATABASE_URL: postgresql://broker:broker@postgres:5432/broker_db
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+      CONTROL_PLANE_URL: http://control-plane:8001
+    ports:
+      - "8000:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  worker:
+    build:
+      context: ../services/broker
+    environment:
+      <<: *common-env
+      DATABASE_URL: postgresql+asyncpg://broker:broker@postgres:5432/broker_db
+      SYNC_DATABASE_URL: postgresql://broker:broker@postgres:5432/broker_db
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+      CONTROL_PLANE_URL: http://control-plane:8001
+    command: ["celery", "-A", "app.workers.celery_app", "worker", "--loglevel=info", "--concurrency=4"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  celery-beat:
+    build:
+      context: ../services/broker
+    environment:
+      <<: *common-env
+      SYNC_DATABASE_URL: postgresql://broker:broker@postgres:5432/broker_db
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+    command: ["celery", "-A", "app.workers.celery_app", "beat", "--loglevel=info"]
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  control-plane:
+    build:
+      context: ../services/control-plane
+    environment:
+      <<: *common-env
+      BROKER_URL: http://broker:8000
+      REDIS_URL: redis://redis:6379/0
+    ports:
+      - "8001:8001"
+    depends_on:
+      broker:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  gateway:
+    build:
+      context: ../services/gateway
+    environment:
+      <<: *common-env
+      CONTROL_PLANE_URL: http://control-plane:8001
+      REDIS_URL: redis://redis:6379/0
+    ports:
+      - "8002:8002"
+    depends_on:
+      - control-plane
+      - redis
+      - ollama
+
+  mcp-registry:
+    build:
+      context: ../services/mcp-registry
+    environment:
+      <<: *common-env
+      CONTROL_PLANE_URL: http://control-plane:8001
+    ports:
+      - "8003:8003"
+    depends_on:
+      - control-plane
+
+  mcp-gateway:
+    build:
+      context: ../services/mcp-gateway
+    environment:
+      <<: *common-env
+      CONTROL_PLANE_URL: http://control-plane:8001
+      REDIS_URL: redis://redis:6379/0
+    ports:
+      - "8005:8005"
+    depends_on:
+      - control-plane
+      - redis
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8005/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  agent-gateway:
+    build:
+      context: ../services/agent-gateway
+    environment:
+      <<: *common-env
+      LLM_GATEWAY_URL: http://gateway:8002
+      MCP_GATEWAY_URL: http://mcp-gateway:8005
+      CONTROL_PLANE_URL: http://control-plane:8001
+      REDIS_URL: redis://redis:6379/0
+    ports:
+      - "8004:8004"
+    depends_on:
+      - gateway
+      - mcp-gateway
+      - redis
+
+volumes:
+  postgres_data:
+  redis_data:
+  ollama_data:
+  grafana_data:

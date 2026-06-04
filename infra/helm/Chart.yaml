@@ -1,0 +1,13 @@
+apiVersion: v2
+name: llm-control-plane
+description: AI Gateway Control Plane — LLM routing, MCP tool registry, guardrails, and observability.
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+keywords:
+  - llm
+  - ai-gateway
+  - mcp
+  - guardrails
+maintainers:
+  - name: Mukul Kumar

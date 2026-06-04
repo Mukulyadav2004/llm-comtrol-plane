@@ -1,0 +1,14 @@
+{
+  "version": "{{ version }}",
+  "servers": [
+    {% for s in mcp_servers if s.enabled %}
+    {
+      "name": "{{ s.name }}",
+      "endpoint_url": "{{ s.endpoint_url }}",
+      "healthy": {{ s.healthy | lower }},
+      "capabilities": {{ s.capabilities | tojson }},
+      "tags": {{ s.tags | tojson }}
+    }{% if not loop.last %},{% endif %}
+    {% endfor %}
+  ]
+}
