@@ -4,6 +4,7 @@ from typing import Any, Dict
 
 import httpx
 
+from app.config import settings
 from app.models.mcp_server import MCPServer
 from app.models.provision import ProvisionRequest, ProvisionStatus
 from app.workers.celery_app import celery_app
@@ -27,6 +28,10 @@ def register_mcp_server(self, instance_id: str, parameters: Dict[str, Any]) -> D
         healthy = _health_check_server(server)
         server.healthy = healthy
         db.commit()
+
+        # Push the new server list to the control plane so the MCP gateway/registry
+        # pick it up on their next poll instead of waiting for the cache TTL.
+        _notify_control_plane(server.name)
 
         request.status = ProvisionStatus.succeeded
         request.result = {"server_name": server.name, "server_id": str(server.id), "healthy": healthy}
@@ -59,6 +64,19 @@ def _upsert_mcp_server(db, params: Dict[str, Any]) -> MCPServer:
     db.commit()
     db.refresh(server)
     return server
+
+
+def _notify_control_plane(server_name: str) -> None:
+    """Invalidate the control plane's MCP cache after a (de)registration."""
+    try:
+        with httpx.Client(timeout=10) as client:
+            resp = client.post(
+                f"{settings.control_plane_url}/internal/reload",
+                json={"resource_type": "mcp_server", "name": server_name},
+            )
+            resp.raise_for_status()
+    except Exception:
+        logger.warning("Could not notify control plane of MCP server %s", server_name)
 
 
 def _health_check_server(server: MCPServer) -> bool:

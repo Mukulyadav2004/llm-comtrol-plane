@@ -4,10 +4,10 @@ A self-hosted AI gateway you run on your own infrastructure. Configure routes, g
 
 ---
 
-## Workin
+## How it works
 
 ```
-  USER
+  You
    │
    ▼
 ┌──────────────┐    declares config    ┌─────────────────┐
@@ -60,6 +60,44 @@ A self-hosted AI gateway you run on your own infrastructure. Configure routes, g
 | MCP Registry | 8003 | Discovers and proxies registered tool servers. |
 | Agent Gateway | 8004 | Orchestrates ReAct loops with step and token budgets. |
 | MCP Gateway | 8005 | Auth, rate limiting, and tracing for every tool call. |
+| Dashboard | 8080 | Web admin UI — manage routes, watch live usage, and a chat playground. |
+
+---
+
+## Dashboard (web UI)
+
+Once the stack is up, open **http://localhost:8080** (`make ui`). No curl required:
+
+- **Routes** — list, create (form), enable/disable, and delete routes.
+- **Usage** — live cost, tokens, requests, and P50/P95/P99 latency per route (auto-refreshes).
+- **Playground** — chat through the gateway; pick a route or use `auto` for semantic routing.
+
+The dashboard talks to the backend over the internal Docker network (a Next.js
+BFF), so backend ports stay off the browser and there's no CORS to configure.
+
+---
+
+## OpenAI-compatible API
+
+The gateway speaks the OpenAI Chat Completions format, so existing apps and the
+official SDKs work by just pointing `base_url` at the gateway and using a route
+name as the `model`:
+
+```python
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8002/v1", api_key="sk-anything")
+resp = client.chat.completions.create(
+    model="local-llama",                 # = your route name
+    messages=[{"role": "user", "content": "Hello!"}],
+)
+print(resp.choices[0].message.content)
+```
+
+- `GET /v1/models` lists every route as a "model" (`make models`).
+- Auth is **off by default** (any key works). To lock it down, set
+  `GATEWAY_REQUIRE_AUTH=true` and `GATEWAY_API_KEYS=key1,key2` on the gateway.
+- The legacy `{"route": "..."}` request shape still works.
 
 ---
 
@@ -79,6 +117,12 @@ make migrate
 
 # 4. Pull the default model into Ollama (first time only, takes ~1 min)
 make pull-model
+```
+
+Then open the dashboard:
+
+```bash
+make ui   # → http://localhost:8080
 ```
 
 Check everything is healthy:

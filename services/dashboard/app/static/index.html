@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Gateway</title>
+<style>
+:root {
+  --bg:#0b0e14; --panel:#141925; --panel2:#1b2230; --border:#28303f;
+  --text:#e6e9ef; --muted:#8b94a7; --accent:#5b8cff; --accent-dim:#1e2d55;
+  --green:#3fb950; --red:#f85149; --yellow:#d29922;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:var(--bg);color:var(--text);font:14px/1.5 ui-sans-serif,system-ui,sans-serif;min-height:100vh}
+a{color:inherit;text-decoration:none}
+/* layout */
+.shell{max-width:1060px;margin:0 auto;padding:0 24px}
+header{display:flex;align-items:center;justify-content:space-between;padding:16px 0;border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--bg);z-index:10}
+.brand{font-weight:700;font-size:16px}.brand span{color:var(--accent);margin-right:6px}
+nav{display:flex;gap:4px}
+.tab{padding:7px 16px;border-radius:8px;color:var(--muted);font-weight:500;cursor:pointer;border:none;background:none;font:inherit;font-size:14px}
+.tab:hover{background:var(--panel);color:var(--text)}
+.tab.active{background:var(--panel);color:var(--text)}
+main{padding:28px 0 80px}
+.page{display:none}.page.active{display:block}
+/* headings */
+h1{font-size:22px;margin-bottom:4px}
+.sub{color:var(--muted);margin-bottom:22px}
+.row{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px}
+/* panel / table */
+.panel{background:var(--panel);border:1px solid var(--border);border-radius:12px;overflow:hidden}
+table{width:100%;border-collapse:collapse}
+th,td{padding:11px 14px;text-align:left;border-bottom:1px solid var(--border)}
+th{color:var(--muted);font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.5px}
+tr:last-child td{border-bottom:none}
+td.num{font-variant-numeric:tabular-nums}
+/* badge */
+.badge{display:inline-block;padding:2px 9px;border-radius:999px;font-size:12px;font-weight:600}
+.badge.on{background:rgba(63,185,80,.15);color:var(--green)}
+.badge.off{background:rgba(248,81,73,.15);color:var(--red)}
+.badge.tag{background:var(--accent-dim);color:var(--accent)}
+/* buttons */
+button,input[type=button]{font:inherit;font-size:14px;border:1px solid var(--border);background:var(--panel2);color:var(--text);padding:8px 14px;border-radius:8px;cursor:pointer;font-weight:500}
+button:hover{border-color:var(--accent)}
+button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+button.danger{color:var(--red)}
+button:disabled{opacity:.45;cursor:not-allowed}
+/* form */
+input,select,textarea{font:inherit;font-size:14px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:9px 11px;width:100%}
+input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent)}
+label{display:block;font-size:12px;color:var(--muted);margin-bottom:5px;font-weight:600}
+.fgrid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px}
+.field{display:flex;flex-direction:column}
+/* modal */
+.backdrop{position:fixed;inset:0;background:rgba(0,0,0,.65);display:flex;align-items:flex-start;justify-content:center;padding-top:80px;z-index:50}
+.modal{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:24px;width:540px;max-width:calc(100vw - 32px)}
+.modal h2{font-size:18px;margin-bottom:18px}
+.modal-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:20px}
+/* alerts */
+.error{color:var(--red);background:rgba(248,81,73,.1);border:1px solid rgba(248,81,73,.3);border-radius:8px;padding:10px 12px;margin:10px 0;font-size:13px;white-space:pre-wrap}
+.notice{color:var(--yellow);background:rgba(210,153,34,.1);border:1px solid rgba(210,153,34,.3);border-radius:8px;padding:10px 12px;margin:10px 0;font-size:13px}
+.empty{text-align:center;color:var(--muted);padding:48px 0}
+/* stat cards */
+.cards{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:22px}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:16px}
+.card .val{font-size:24px;font-weight:700}
+.card .lbl{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.5px;margin-top:2px}
+/* chat */
+.chat-wrap{display:flex;flex-direction:column;gap:14px}
+.chat-top{display:flex;gap:12px;align-items:flex-end}
+.chat-top .field{flex:1}
+.messages{min-height:220px;display:flex;flex-direction:column;gap:10px;padding:16px;background:var(--panel2);border:1px solid var(--border);border-radius:10px}
+.msg{padding:11px 14px;border-radius:10px;max-width:82%;white-space:pre-wrap;line-height:1.55}
+.msg.user{align-self:flex-end;background:var(--accent-dim)}
+.msg.assistant{align-self:flex-start;background:var(--panel);border:1px solid var(--border)}
+.msg .role{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px}
+.composer{display:flex;gap:10px}
+.composer textarea{resize:vertical;min-height:50px}
+.meta{font-size:12px;color:var(--muted);display:flex;gap:14px;flex-wrap:wrap}
+.meta strong{color:var(--text)}
+/* misc */
+code{font-family:ui-monospace,monospace;background:var(--panel2);padding:1px 5px;border-radius:4px;font-size:13px}
+</style>
+</head>
+<body>
+<div class="shell">
+  <header>
+    <div class="brand"><span>◆</span> AI Gateway</div>
+    <nav>
+      <button class="tab active" onclick="show('routes',this)">Routes</button>
+      <button class="tab" onclick="show('usage',this)">Usage</button>
+      <button class="tab" onclick="show('playground',this)">Playground</button>
+    </nav>
+  </header>
+  <main>
+
+    <!-- ── ROUTES ─────────────────────────────────────────────────── -->
+    <div id="page-routes" class="page active">
+      <div class="row">
+        <div>
+          <h1>Routes</h1>
+          <p class="sub">A route is a named profile — which model to call, rate limit, guardrails, and fallback.</p>
+        </div>
+        <button class="primary" onclick="openCreate()">+ New Route</button>
+      </div>
+      <div id="routes-alert"></div>
+      <div class="panel">
+        <table>
+          <thead><tr>
+            <th>Name</th><th>Provider</th><th>Model</th>
+            <th>Rate limit</th><th>Fallback</th><th>Status</th><th></th>
+          </tr></thead>
+          <tbody id="routes-tbody"><tr><td colspan="7" class="empty">Loading…</td></tr></tbody>
+        </table>
+      </div>
+
+      <!-- create modal -->
+      <div id="create-modal" class="backdrop" style="display:none" onclick="if(event.target===this)closeCreate()">
+        <div class="modal">
+          <h2>New Route</h2>
+          <div id="create-err"></div>
+          <div class="fgrid">
+            <div class="field"><label>Name</label><input id="f-name" placeholder="my-route"></div>
+            <div class="field"><label>Provider</label>
+              <select id="f-provider" onchange="providerChanged()">
+                <option value="ollama">ollama</option>
+                <option value="openai">openai</option>
+                <option value="anthropic">anthropic</option>
+                <option value="google">google</option>
+              </select>
+            </div>
+            <div class="field"><label>Model</label><input id="f-model" placeholder="llama3.2:1b"></div>
+            <div class="field"><label>Base URL</label><input id="f-base-url" value="http://ollama:11434"></div>
+            <div class="field"><label>Rate limit (rpm)</label><input id="f-rpm" type="number" value="60"></div>
+            <div class="field"><label>Max tokens</label><input id="f-maxtok" type="number" value="4096"></div>
+            <div class="field"><label>Temperature</label><input id="f-temp" type="number" step="0.1" value="0.7"></div>
+            <div class="field"><label>Cost / 1k tokens ($)</label><input id="f-cost" type="number" step="0.0001" value="0"></div>
+            <div class="field" style="grid-column:1/-1"><label>Fallback route (optional)</label><input id="f-fallback" placeholder="another-route-name"></div>
+          </div>
+          <div class="modal-actions">
+            <button onclick="closeCreate()">Cancel</button>
+            <button class="primary" id="create-btn" onclick="submitCreate()">Create Route</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── USAGE ──────────────────────────────────────────────────── -->
+    <div id="page-usage" class="page">
+      <div class="row">
+        <div>
+          <h1>Usage</h1>
+          <p class="sub">Live cost, tokens, and latency per route. Auto-refreshes every 5 s.</p>
+        </div>
+        <button onclick="loadUsage()">Refresh</button>
+      </div>
+      <div class="cards">
+        <div class="card"><div class="val" id="u-reqs">—</div><div class="lbl">Total requests</div></div>
+        <div class="card"><div class="val" id="u-tokens">—</div><div class="lbl">Total tokens</div></div>
+        <div class="card"><div class="val" id="u-cost">—</div><div class="lbl">Total cost</div></div>
+        <div class="card"><div class="val" id="u-routes">—</div><div class="lbl">Active routes</div></div>
+      </div>
+      <div id="usage-alert"></div>
+      <div class="panel">
+        <table>
+          <thead><tr>
+            <th>Route</th><th>Requests</th><th>Tokens</th>
+            <th>Cost (USD)</th><th>P50</th><th>P95</th><th>P99</th>
+          </tr></thead>
+          <tbody id="usage-tbody"><tr><td colspan="7" class="empty">Loading…</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ── PLAYGROUND ─────────────────────────────────────────────── -->
+    <div id="page-playground" class="page">
+      <h1>Playground</h1>
+      <p class="sub">Chat through the gateway. Pick a route, or choose <code>auto</code> to let semantic routing decide.</p>
+      <div class="chat-wrap panel" style="padding:18px">
+        <div class="chat-top">
+          <div class="field">
+            <label>Route / model</label>
+            <select id="pg-route"></select>
+          </div>
+          <button onclick="clearChat()">Clear</button>
+        </div>
+        <div class="messages" id="pg-messages">
+          <div class="empty" id="pg-empty">Send a message to start.</div>
+        </div>
+        <div id="pg-alert"></div>
+        <div class="meta" id="pg-meta" style="display:none"></div>
+        <div class="composer">
+          <textarea id="pg-input" placeholder="Ask anything…  (Enter to send, Shift+Enter for newline)" onkeydown="pgKey(event)"></textarea>
+          <button class="primary" id="pg-send" onclick="pgSend()">Send</button>
+        </div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<script>
+// ── state ────────────────────────────────────────────────────────────────────
+let pgMessages = [];
+let usageTimer = null;
+
+// ── tab switching ─────────────────────────────────────────────────────────────
+function show(page, btn) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(b => b.classList.remove('active'));
+  document.getElementById('page-' + page).classList.add('active');
+  btn.classList.add('active');
+  if (page === 'routes') loadRoutes();
+  if (page === 'usage') { loadUsage(); startUsageTimer(); }
+  else stopUsageTimer();
+  if (page === 'playground') loadPgRoutes();
+}
+
+// ── helpers ───────────────────────────────────────────────────────────────────
+async function api(method, path, body) {
+  const opts = { method, headers: { 'Content-Type': 'application/json' } };
+  if (body !== undefined) opts.body = JSON.stringify(body);
+  const r = await fetch(path, opts);
+  let data;
+  try { data = await r.json(); } catch { data = {}; }
+  if (!r.ok) throw new Error(JSON.stringify(data?.detail ?? data?.error ?? data));
+  return data;
+}
+
+function fmt(n, dec = 0) {
+  if (n == null) return '—';
+  return typeof n === 'number' ? n.toLocaleString(undefined, { minimumFractionDigits: dec, maximumFractionDigits: dec }) : n;
+}
+
+function ms(v) { return v == null ? '—' : Math.round(v) + ' ms'; }
+
+function setAlert(id, msg, type = 'error') {
+  const el = document.getElementById(id);
+  el.innerHTML = msg ? `<div class="${type}">${esc(msg)}</div>` : '';
+}
+
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ── ROUTES ────────────────────────────────────────────────────────────────────
+async function loadRoutes() {
+  const tbody = document.getElementById('routes-tbody');
+  try {
+    const routes = await api('GET', '/api/routes');
+    if (!routes.length) {
+      tbody.innerHTML = '<tr><td colspan="7" class="empty">No routes yet — click "+ New Route" to create one.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = routes.map(r => `
+      <tr>
+        <td><strong>${esc(r.name)}</strong></td>
+        <td><span class="badge tag">${esc(r.provider)}</span></td>
+        <td style="color:var(--muted)">${esc(r.model)}</td>
+        <td>${r.rate_limit_rpm}/min</td>
+        <td style="color:var(--muted)">${r.fallback_route_name ? esc(r.fallback_route_name) : '—'}</td>
+        <td><span class="badge ${r.enabled ? 'on' : 'off'}">${r.enabled ? 'enabled' : 'disabled'}</span></td>
+        <td style="text-align:right;white-space:nowrap">
+          <button onclick="toggleRoute('${esc(r.name)}',${r.enabled})" style="margin-right:8px">
+            ${r.enabled ? 'Disable' : 'Enable'}
+          </button>
+          <button class="danger" onclick="deleteRoute('${esc(r.name)}')">Delete</button>
+        </td>
+      </tr>`).join('');
+  } catch(e) {
+    setAlert('routes-alert', e.message);
+  }
+}
+
+async function toggleRoute(name, enabled) {
+  try {
+    await api('PATCH', `/api/routes/${encodeURIComponent(name)}`, { enabled: !enabled });
+    await loadRoutes();
+  } catch(e) { setAlert('routes-alert', e.message); }
+}
+
+async function deleteRoute(name) {
+  if (!confirm(`Delete route "${name}"? This cannot be undone.`)) return;
+  try {
+    await api('DELETE', `/api/routes/${encodeURIComponent(name)}`);
+    setAlert('routes-alert', '');
+    await loadRoutes();
+  } catch(e) { setAlert('routes-alert', e.message); }
+}
+
+// create modal
+function openCreate() {
+  document.getElementById('create-modal').style.display = 'flex';
+  document.getElementById('create-err').innerHTML = '';
+  document.getElementById('f-name').focus();
+}
+function closeCreate() { document.getElementById('create-modal').style.display = 'none'; }
+
+function providerChanged() {
+  const p = document.getElementById('f-provider').value;
+  const urlField = document.getElementById('f-base-url');
+  if (p === 'ollama') urlField.value = 'http://ollama:11434';
+  else if (p === 'openai') urlField.value = 'https://api.openai.com';
+  else if (p === 'anthropic') urlField.value = 'https://api.anthropic.com';
+  else urlField.value = '';
+}
+
+async function submitCreate() {
+  const btn = document.getElementById('create-btn');
+  btn.disabled = true; btn.textContent = 'Creating…';
+  try {
+    await api('POST', '/api/routes', {
+      name: document.getElementById('f-name').value,
+      provider: document.getElementById('f-provider').value,
+      model: document.getElementById('f-model').value,
+      base_url: document.getElementById('f-base-url').value,
+      rate_limit_rpm: Number(document.getElementById('f-rpm').value),
+      max_tokens: Number(document.getElementById('f-maxtok').value),
+      temperature: Number(document.getElementById('f-temp').value),
+      cost_per_1k_tokens: Number(document.getElementById('f-cost').value),
+      fallback_route_name: document.getElementById('f-fallback').value,
+    });
+    closeCreate();
+    setAlert('routes-alert', 'Route provisioned — it may take ~30 s to go live on the gateway.', 'notice');
+    await loadRoutes();
+  } catch(e) {
+    document.getElementById('create-err').innerHTML = `<div class="error">${esc(e.message)}</div>`;
+  } finally {
+    btn.disabled = false; btn.textContent = 'Create Route';
+  }
+}
+
+// ── USAGE ─────────────────────────────────────────────────────────────────────
+async function loadUsage() {
+  const tbody = document.getElementById('usage-tbody');
+  try {
+    const { usage } = await api('GET', '/api/usage');
+    const rows = usage ?? [];
+
+    // summary cards
+    const totReqs = rows.reduce((s, r) => s + (r.total_requests || 0), 0);
+    const totTok  = rows.reduce((s, r) => s + (r.total_tokens || 0), 0);
+    const totUsd  = rows.reduce((s, r) => s + (r.total_usd || 0), 0);
+    document.getElementById('u-reqs').textContent   = totReqs.toLocaleString();
+    document.getElementById('u-tokens').textContent = totTok.toLocaleString();
+    document.getElementById('u-cost').textContent   = '$' + totUsd.toFixed(4);
+    document.getElementById('u-routes').textContent = rows.length;
+
+    if (!rows.length) {
+      tbody.innerHTML = '<tr><td colspan="7" class="empty">No usage yet — send a request from the Playground to see stats here.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = rows.map(r => `
+      <tr>
+        <td><strong>${esc(r.route)}</strong></td>
+        <td class="num">${fmt(r.total_requests)}</td>
+        <td class="num">${fmt(r.total_tokens)}</td>
+        <td class="num">$${r.total_usd?.toFixed(4) ?? '0.0000'}</td>
+        <td class="num">${ms(r.latency?.p50_ms)}</td>
+        <td class="num">${ms(r.latency?.p95_ms)}</td>
+        <td class="num">${ms(r.latency?.p99_ms)}</td>
+      </tr>`).join('');
+    setAlert('usage-alert', '');
+  } catch(e) {
+    setAlert('usage-alert', e.message);
+  }
+}
+
+function startUsageTimer() { usageTimer = setInterval(loadUsage, 5000); }
+function stopUsageTimer()  { clearInterval(usageTimer); usageTimer = null; }
+
+// ── PLAYGROUND ────────────────────────────────────────────────────────────────
+async function loadPgRoutes() {
+  const sel = document.getElementById('pg-route');
+  try {
+    const routes = await api('GET', '/api/routes');
+    const names = routes.filter(r => r.enabled !== false).map(r => r.name);
+    sel.innerHTML = ['auto', ...names].map(n => `<option value="${esc(n)}">${esc(n)}</option>`).join('');
+    if (names.length) sel.value = names[0];
+  } catch { /* leave blank */ }
+}
+
+function clearChat() {
+  pgMessages = [];
+  document.getElementById('pg-messages').innerHTML =
+    '<div class="empty" id="pg-empty">Send a message to start.</div>';
+  document.getElementById('pg-meta').style.display = 'none';
+  document.getElementById('pg-alert').innerHTML = '';
+}
+
+function renderMessages() {
+  const box = document.getElementById('pg-messages');
+  if (!pgMessages.length) {
+    box.innerHTML = '<div class="empty" id="pg-empty">Send a message to start.</div>';
+    return;
+  }
+  box.innerHTML = pgMessages.map(m => `
+    <div class="msg ${esc(m.role)}">
+      <div class="role">${esc(m.role)}</div>
+      ${esc(m.content)}
+    </div>`).join('');
+  box.lastElementChild?.scrollIntoView({ behavior: 'smooth' });
+}
+
+function pgKey(e) {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); pgSend(); }
+}
+
+async function pgSend() {
+  const input = document.getElementById('pg-input').value.trim();
+  const model = document.getElementById('pg-route').value;
+  if (!input || !model) return;
+
+  document.getElementById('pg-alert').innerHTML = '';
+  document.getElementById('pg-meta').style.display = 'none';
+  document.getElementById('pg-input').value = '';
+  document.getElementById('pg-send').disabled = true;
+
+  pgMessages.push({ role: 'user', content: input });
+  renderMessages();
+
+  // show thinking indicator
+  const box = document.getElementById('pg-messages');
+  const thinking = document.createElement('div');
+  thinking.className = 'msg assistant';
+  thinking.innerHTML = '<div class="role">assistant</div><span style="color:var(--muted)">thinking…</span>';
+  box.appendChild(thinking);
+  thinking.scrollIntoView({ behavior: 'smooth' });
+
+  const t0 = performance.now();
+  try {
+    const data = await api('POST', '/api/chat', { model, messages: pgMessages });
+    const content = data?.choices?.[0]?.message?.content ?? '(empty response)';
+    pgMessages.push({ role: 'assistant', content });
+    renderMessages();
+
+    // meta bar
+    const parts = [];
+    if (data._route)      parts.push(`route: <strong>${esc(data._route)}</strong>`);
+    if (data._intent)     parts.push(`intent: <strong>${esc(data._intent)}</strong>`);
+    if (data.usage?.total_tokens) parts.push(`tokens: <strong>${data.usage.total_tokens}</strong>`);
+    parts.push(`latency: <strong>${Math.round(performance.now()-t0)} ms</strong>`);
+    const meta = document.getElementById('pg-meta');
+    meta.innerHTML = parts.join(' &nbsp;·&nbsp; ');
+    meta.style.display = 'flex';
+  } catch(e) {
+    thinking.remove();
+    setAlert('pg-alert', e.message);
+  } finally {
+    document.getElementById('pg-send').disabled = false;
+  }
+}
+
+// ── init ──────────────────────────────────────────────────────────────────────
+loadRoutes();
+</script>
+</body>
+</html>

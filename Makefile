@@ -1,6 +1,6 @@
 COMPOSE = docker compose -f infra/docker-compose.yml
 
-.PHONY: up down build logs ps migrate shell-broker shell-gateway
+.PHONY: up down build logs ps migrate shell-broker shell-gateway ui models
 
 up:
 	$(COMPOSE) up -d
@@ -45,6 +45,15 @@ test-chat:
 	curl -s -X POST http://localhost:8002/v1/chat/completions \
 	  -H 'Content-Type: application/json' \
 	  -d '{"route":"local-llama","messages":[{"role":"user","content":"Hello! Explain what an LLM Gateway is in 2 sentences."}]}' | python3 -m json.tool
+
+# Open the admin dashboard (Routes / Usage / Playground)
+ui:
+	@echo "Dashboard → http://localhost:8080"
+	@command -v open >/dev/null && open http://localhost:8080 || true
+
+# List models the OpenAI-compatible way (each route is a 'model')
+models:
+	curl -s http://localhost:8002/v1/models | python3 -m json.tool
 
 # View catalog
 catalog:
@@ -108,17 +117,62 @@ agent-stream:
 	@echo "Usage: SESSION_ID=<id> make agent-stream"
 	curl -N http://localhost:8004/v1/agents/$(SESSION_ID)/stream
 
-# ── MCP Gateway demos ─────────────────────────────────────────────────────────
+# ── MCP tool servers + MCP Gateway demos ──────────────────────────────────────
 
-# List all tools available via MCP Gateway
+# Register both MCP tool servers with the broker (utility + knowledge toolsets).
+# The broker health-checks each server and notifies the control plane, so the
+# registry/gateway discover the tools on their next poll.
+register-mcp-tools:
+	curl -s -X PUT http://localhost:8000/v2/service_instances/mcp-utility \
+	  -H 'Content-Type: application/json' \
+	  -d '{"service_id":"mcp-server","plan_id":"standard","instance_id":"mcp-utility","parameters":{"name":"utility-tools","endpoint_url":"http://mcp-tools-utility:8100","description":"Math, time, unit and text utilities","capabilities":["calculator","current_datetime","unit_convert","random_number","text_stats"],"tags":{"category":"utility"},"health_check_path":"/health"}}' | python3 -m json.tool
+	curl -s -X PUT http://localhost:8000/v2/service_instances/mcp-knowledge \
+	  -H 'Content-Type: application/json' \
+	  -d '{"service_id":"mcp-server","plan_id":"standard","instance_id":"mcp-knowledge","parameters":{"name":"knowledge-tools","endpoint_url":"http://mcp-tools-knowledge:8100","description":"Web search and Wikipedia lookup","capabilities":["web_search","wikipedia"],"tags":{"category":"knowledge"},"health_check_path":"/health"}}' | python3 -m json.tool
+
+# List all discovered tools (name + description + schema) via the MCP Gateway
 mcp-tools:
 	curl -s http://localhost:8005/v1/tools | python3 -m json.tool
 
-# Call a tool through MCP Gateway (example)
+# Call a specific tool through the MCP Gateway
 mcp-call:
 	curl -s -X POST http://localhost:8005/v1/tools/call \
 	  -H 'Content-Type: application/json' \
-	  -d '{"tool":"search","arguments":{"query":"what is an LLM gateway"},"caller_id":"demo-client"}' | python3 -m json.tool
+	  -d '{"tool":"calculator","arguments":{"expression":"(240*15)/100"},"caller_id":"demo-client"}' | python3 -m json.tool
+
+# Intelligent routing — gateway picks the right tool for a natural-language request
+mcp-route:
+	curl -s -X POST http://localhost:8005/v1/tools/route \
+	  -H 'Content-Type: application/json' \
+	  -d '{"query":"who is Alan Turing"}' | python3 -m json.tool
+
+# Full auto: route to the best tool, extract its arguments, and call it
+mcp-execute:
+	curl -s -X POST http://localhost:8005/v1/tools/execute \
+	  -H 'Content-Type: application/json' \
+	  -d '{"query":"what is 15 percent of 240","caller_id":"demo-client"}' | python3 -m json.tool
+
+mcp-execute-knowledge:
+	curl -s -X POST http://localhost:8005/v1/tools/execute \
+	  -H 'Content-Type: application/json' \
+	  -d '{"query":"give me a short summary of the Eiffel Tower","caller_id":"demo-client"}' | python3 -m json.tool
+
+# Guardrail demo — register a PII-redaction guardrail, then push PII through a
+# tool and confirm the gateway scrubs it (applies on both arguments and results).
+mcp-guardrail-demo:
+	curl -s -X PUT http://localhost:8000/v2/service_instances/gr-pii \
+	  -H 'Content-Type: application/json' \
+	  -d '{"service_id":"guardrail","plan_id":"pii","instance_id":"gr-pii","parameters":{"name":"pii-redact","guardrail_type":"pii","action_on_violation":"redact","apply_on_input":true,"apply_on_output":true,"config":{}}}' | python3 -m json.tool
+	@echo "\nNow call a tool with PII in the arguments — watch it get redacted:"
+	curl -s -X POST http://localhost:8005/v1/tools/call \
+	  -H 'Content-Type: application/json' \
+	  -d '{"tool":"text_stats","arguments":{"text":"contact me at jane.doe@example.com or 555-123-4567"}}' | python3 -m json.tool
+
+# Show the SSRF guard rejecting an internal URL passed as a tool argument
+mcp-ssrf-demo:
+	curl -s -X POST http://localhost:8005/v1/tools/call \
+	  -H 'Content-Type: application/json' \
+	  -d '{"tool":"web_search","arguments":{"query":"http://169.254.169.254/latest/meta-data"}}' | python3 -m json.tool
 
 # ── Observability provisioning demos ─────────────────────────────────────────
 

@@ -2,6 +2,9 @@
 import logging
 from typing import Any, Dict
 
+import httpx
+
+from app.config import settings
 from app.models.guardrail import GuardrailConfig
 from app.models.provision import ProvisionRequest, ProvisionStatus
 from app.workers.celery_app import celery_app
@@ -22,6 +25,7 @@ def configure_guardrail(self, instance_id: str, parameters: Dict[str, Any]) -> D
         db.commit()
 
         guardrail = _upsert_guardrail(db, parameters)
+        _notify_control_plane(guardrail.name)
 
         request.status = ProvisionStatus.succeeded
         request.result = {"guardrail_name": guardrail.name, "guardrail_id": str(guardrail.id)}
@@ -38,6 +42,19 @@ def configure_guardrail(self, instance_id: str, parameters: Dict[str, Any]) -> D
         raise self.retry(exc=exc, countdown=10)
     finally:
         db.close()
+
+
+def _notify_control_plane(name: str) -> None:
+    """Invalidate the control plane's guardrail cache so gateways pick it up."""
+    try:
+        with httpx.Client(timeout=10) as client:
+            resp = client.post(
+                f"{settings.control_plane_url}/internal/reload",
+                json={"resource_type": "guardrail", "name": name},
+            )
+            resp.raise_for_status()
+    except Exception:
+        logger.warning("Could not notify control plane of guardrail %s", name)
 
 
 def _upsert_guardrail(db, params: Dict[str, Any]) -> GuardrailConfig:

@@ -172,6 +172,27 @@ services:
       - redis
       - ollama
 
+  # ── MCP tool servers ──────────────────────────────────────────────────────
+  # One image, deployed twice with a different TOOLSET, so the registry/gateway
+  # demonstrably route a call to the correct *server* as well as the correct tool.
+  mcp-tools-utility:
+    build:
+      context: ../services/mcp-tools
+    environment:
+      <<: *common-env
+      TOOLSET: utility
+    ports:
+      - "8101:8100"
+
+  mcp-tools-knowledge:
+    build:
+      context: ../services/mcp-tools
+    environment:
+      <<: *common-env
+      TOOLSET: knowledge
+    ports:
+      - "8102:8100"
+
   mcp-registry:
     build:
       context: ../services/mcp-registry
@@ -190,11 +211,14 @@ services:
       <<: *common-env
       CONTROL_PLANE_URL: http://control-plane:8001
       REDIS_URL: redis://redis:6379/0
+      LLM_GATEWAY_URL: http://gateway:8002
     ports:
       - "8005:8005"
     depends_on:
       - control-plane
       - redis
+      - mcp-tools-utility
+      - mcp-tools-knowledge
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8005/health"]
       interval: 10s
@@ -216,6 +240,25 @@ services:
       - gateway
       - mcp-gateway
       - redis
+
+  # ─────────────────────────────────────────────
+  # Admin dashboard (Next.js)
+  # ─────────────────────────────────────────────
+  dashboard:
+    build:
+      context: ../services/dashboard
+    environment:
+      <<: *common-env
+      # Server-side (BFF) URLs — resolved over the Docker network, never exposed
+      # to the browser. The dashboard proxies all calls through its own /api.
+      BROKER_URL: http://broker:8000
+      GATEWAY_URL: http://gateway:8002
+      AGENT_GATEWAY_URL: http://agent-gateway:8004
+    ports:
+      - "8080:8080"
+    depends_on:
+      - broker
+      - gateway
 
 volumes:
   postgres_data:
