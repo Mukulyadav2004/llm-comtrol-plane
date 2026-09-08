@@ -1,0 +1,10 @@
+# Test-only dependencies. These are ADDITIVE: the suite imports the gateway
+# package, so install the service's own requirements alongside them:
+#
+#   pip install -r services/gateway/requirements.txt -r requirements-dev.txt
+
+pytest==8.3.3
+pytest-asyncio==0.24.0
+fakeredis==2.26.1
+lupa==2.2                 # Lua scripting support for fakeredis (rate limiter)
+httpx==0.27.0             # fastapi.testclient transport
