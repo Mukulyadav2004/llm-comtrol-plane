@@ -30,6 +30,7 @@ import time
 from typing import Any, Dict, List, Optional
 
 from app.middleware.latency_tracker import get_percentile, record_latency
+from app.providers.base import ProviderError
 from app.router.config_store import get_route
 
 log = logging.getLogger(__name__)
@@ -78,40 +79,61 @@ async def hedged_call(
     winner_result: Optional[Dict[str, Any]] = None
     winner_route: Optional[str] = None
 
+    errors: Dict[str, BaseException] = {}
+
     try:
         # Wait for primary up to hedge threshold
         done, _ = await asyncio.wait({primary_task}, timeout=hedge_ms / 1000)
 
-        if primary_task in done and not primary_task.exception():
-            # Primary finished before hedge threshold — fast path, no secondary needed
-            duration_ms, result = primary_task.result()
-            record_latency(primary_route_name, duration_ms)
-            result["_hedged"] = False
-            return result
+        if primary_task in done:
+            primary_exc = primary_task.exception()
+            if primary_exc is None:
+                # Finished inside the threshold — fast path, no secondary needed.
+                duration_ms, result = primary_task.result()
+                record_latency(primary_route_name, duration_ms)
+                result["_hedged"] = False
+                return result
 
-        # Primary is slow — fire secondary in parallel
+            # It failed rather than being slow. Hedging exists to cover a slow
+            # tail, not a broken request: a malformed prompt or a bad key will
+            # fail the same way on the secondary, so firing it just spends a
+            # second upstream to reach the same error.
+            if isinstance(primary_exc, ProviderError) and not primary_exc.retryable:
+                log.info(
+                    "hedge.primary_failed_permanently route=%s error=%s",
+                    primary_route_name, primary_exc,
+                )
+                raise primary_exc
+            errors[primary_route_name] = primary_exc
+
+        # Primary is slow, or failed in a way worth retrying elsewhere.
         log.info("hedge.firing_secondary", secondary=hedge_route_name, delay_ms=hedge_ms)
         secondary_task = loop.create_task(
             _timed_call(hedge_route_name, messages, call_fn),
             name=f"hedge-secondary-{hedge_route_name}",
         )
 
-        # Wait for whichever finishes first
-        done, pending = await asyncio.wait(
-            {primary_task, secondary_task},
-            return_when=asyncio.FIRST_COMPLETED,
-        )
-
-        for task in done:
-            if not task.exception():
-                duration_ms, result = task.result()
+        # Take the first *successful* answer. Stopping at the first task to
+        # merely finish would abandon a healthy secondary whenever the primary
+        # happened to fail first.
+        pending = {primary_task, secondary_task}
+        while pending and winner_result is None:
+            done, pending = await asyncio.wait(
+                pending, return_when=asyncio.FIRST_COMPLETED
+            )
+            for task in done:
                 route = primary_route_name if task is primary_task else hedge_route_name
+                exc = task.exception()
+                if exc is not None:
+                    errors[route] = exc
+                    continue
+                duration_ms, result = task.result()
                 record_latency(route, duration_ms)
                 winner_result = result
                 winner_route = route
                 break
 
-        # Cancel the slower task
+        # Cancel whatever is still in flight; its answer is no longer wanted.
         for task in pending:
             task.cancel()
             try:
@@ -120,7 +142,13 @@ async def hedged_call(
                 pass
 
         if winner_result is None:
-            raise RuntimeError("Both hedged requests failed")
+            # Surface the primary's failure by preference — it is the route the
+            # caller actually asked for, and a generic "both failed" throws away
+            # the status code the layer above branches on.
+            raise errors.get(primary_route_name) or next(
+                iter(errors.values()),
+                RuntimeError("Both hedged requests failed"),
+            )
 
         winner_result["_hedged"] = True
         winner_result["_hedge_winner"] = winner_route

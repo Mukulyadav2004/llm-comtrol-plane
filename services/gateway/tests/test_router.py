@@ -174,6 +174,29 @@ async def test_missing_provider_usage_is_estimated_not_dropped(monkeypatch, rout
 # ── provider error handling ───────────────────────────────────────────────────
 
 @pytest.mark.asyncio
+async def test_a_non_retryable_provider_error_does_not_burn_the_fallback(
+    monkeypatch, route
+):
+    """A 400 or a bad key fails identically on the fallback route. Trying it
+    doubles the latency of an error the caller has to fix anyway."""
+    from app.providers.base import ProviderBadRequestError
+
+    install_routes(monkeypatch, [route("primary", fallback="backup"), route("backup")])
+    calls = {"n": 0}
+
+    def behaviour(model):
+        calls["n"] += 1
+        return ProviderBadRequestError("model does not exist", provider="ollama",
+                                       status_code=400)
+
+    stub_provider(monkeypatch, behaviour)
+
+    with pytest.raises(RoutingError, match="model does not exist"):
+        await route_request("primary", MESSAGES)
+    assert calls["n"] == 1, "the fallback route should not have been attempted"
+
+
+@pytest.mark.asyncio
 async def test_a_retryable_provider_error_does_fall_back(monkeypatch, route):
     from app.providers.base import ProviderOverloadedError
 
