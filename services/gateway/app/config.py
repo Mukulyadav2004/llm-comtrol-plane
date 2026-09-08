@@ -34,6 +34,10 @@ class Settings(BaseSettings):
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()] or ["*"]
 
+    # Default upstream timeout in seconds; a route may override it with
+    # policy.timeout_seconds.
+    request_timeout: float = 120.0
+
     # Semantic routing classifier — uses a fast local Ollama model to classify intent
     classifier_base_url: str = "http://ollama:11434"
     classifier_model: str = "llama3.2:1b"

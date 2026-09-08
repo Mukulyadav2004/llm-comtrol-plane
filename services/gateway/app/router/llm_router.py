@@ -38,7 +38,8 @@ from app.middleware.observability.tracer import dispatch_trace
 from app.middleware.rate_limit import check_rate_limit_detailed
 from app.middleware.stream_guard import StreamGuard
 from app.middleware.token_counter import resolve_usage
-from app.providers import ollama
+from app.providers import ProviderError, ProviderRequest, get_provider
+from app.providers.credentials import resolve_api_key
 from app.router.classifier import classify_intent
 from app.router.config_store import (
     get_all_guardrails_for_route,
@@ -49,14 +50,6 @@ from app.router.config_store import (
 from app.router.hedged_request import hedged_call
 
 log = logging.getLogger(__name__)
-
-_PROVIDER_MAP = {
-    "ollama": ollama.chat_completion,
-}
-
-_STREAM_PROVIDER_MAP = {
-    "ollama": ollama.stream_chat_completion,
-}
 
 # How many fallback hops a single client request may take before we give up.
 MAX_FALLBACK_DEPTH = 3
@@ -184,6 +177,11 @@ async def route_request(
 
     except Exception as exc:
         log.warning("gateway.provider_error route=%s error=%s", resolved_route, exc)
+        # A 400 or a bad API key will fail identically on the fallback route, so
+        # trying it just burns a second upstream and doubles the latency of an
+        # error the caller has to fix anyway. Only retryable failures fall back.
+        if isinstance(exc, ProviderError) and not exc.retryable:
+            raise RoutingError(f"Provider call failed: {exc}") from exc
         if hedge_route and hedge_route != resolved_route:
             log.info("gateway.hard_fallback route=%s fallback=%s", resolved_route, hedge_route)
             return await route_request(
@@ -242,10 +240,9 @@ async def stream_request(
     mid-stream surfaces as an error chunk, not a retry on another route.
     """
     route = prepared.route
-    provider = route["provider"]
-    fn = _STREAM_PROVIDER_MAP.get(provider)
-    if not fn:
-        raise RoutingError(f"Streaming not supported for provider: {provider}")
+    provider, provider_req = build_provider_request(route, prepared.messages)
+    if not provider.supports_streaming:
+        raise RoutingError(f"Streaming not supported for provider: {provider.name}")
 
     policy = prepared.policy
     guard = StreamGuard(compile_stream_rules(prepared.guardrails))
@@ -253,15 +250,16 @@ async def stream_request(
     start = time.monotonic()
 
     try:
-        async for chunk in fn(
-            base_url=route.get("base_url", ""),
-            model=route["model"],
-            messages=prepared.messages,
-            max_tokens=policy.get("max_tokens", 4096),
-            temperature=policy.get("temperature", 0.7),
-        ):
+        async for chunk in provider.stream_chat_completion(provider_req):
             if "_usage" in chunk:
                 reported_usage = chunk.pop("_usage")
+
+            # Providers disagree about where usage goes: Ollama attaches it to
+            # the finish frame, OpenAI-compatible servers send a trailing
+            # choices-free chunk, Anthropic splits it across two events. Having
+            # harvested it above, a chunk with no choices carries nothing else.
+            if not chunk.get("choices"):
+                continue
 
             choice = chunk["choices"][0]
             delta = choice.get("delta", {}) or {}
@@ -400,16 +398,33 @@ async def _resolve_route(
     return resolved, intent, confidence
 
 
-async def _provider_call(route: Dict, messages: List) -> Dict[str, Any]:
-    provider = route["provider"]
-    fn = _PROVIDER_MAP.get(provider)
-    if not fn:
-        raise RoutingError(f"Unsupported provider: {provider}")
+def build_provider_request(route: Dict, messages: List) -> tuple:
+    """Resolve a route to (provider, ProviderRequest).
+
+    The credential is looked up here rather than being carried in the route, so
+    a secret never reaches the Broker, the Control Plane, or the Redis cache the
+    config is served from. See app/providers/credentials.py.
+    """
+    try:
+        provider = get_provider(route["provider"])
+    except KeyError as exc:
+        raise RoutingError(str(exc)) from exc
+
     policy = route.get("policy", {}) or {}
-    return await fn(
-        base_url=route.get("base_url", ""),
+    req = ProviderRequest(
         model=route["model"],
         messages=messages,
         max_tokens=policy.get("max_tokens", 4096),
         temperature=policy.get("temperature", 0.7),
+        stop=policy.get("stop"),
+        base_url=route.get("base_url") or None,
+        api_key=resolve_api_key(provider, route),
+        timeout=float(policy.get("timeout_seconds", settings.request_timeout)),
+        extra=route.get("provider_options", {}) or {},
     )
+    return provider, req
+
+
+async def _provider_call(route: Dict, messages: List) -> Dict[str, Any]:
+    provider, req = build_provider_request(route, messages)
+    return await provider.chat_completion(req)

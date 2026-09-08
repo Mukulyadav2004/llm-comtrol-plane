@@ -13,6 +13,7 @@ from pydantic import BaseModel
 
 from app.config import settings
 from app.middleware.auth import require_api_key
+from app.providers import available_providers, get_provider
 from app.middleware.cost_tracker import get_all_stats, get_route_stats
 from app.middleware.latency_tracker import get_stats as get_latency_stats
 from app.router.config_store import list_routes, get_semantic_rules, poll_config, refresh_config
@@ -196,6 +197,26 @@ async def list_models():
         for r in routes
     ]
     return {"object": "list", "data": data}
+
+
+@app.get("/v1/providers")
+async def list_providers():
+    """Backends this gateway build can serve.
+
+    Useful when a route provisions cleanly but 502s: it says whether the data
+    plane actually knows the provider name the Broker accepted.
+    """
+    providers = []
+    for name in available_providers():
+        p = get_provider(name)
+        providers.append({
+            "name": name,
+            "default_base_url": p.default_base_url,
+            "api_key_env": p.api_key_env,
+            "requires_api_key": p.requires_api_key,
+            "supports_streaming": p.supports_streaming,
+        })
+    return {"providers": providers}
 
 
 @app.get("/v1/routes")

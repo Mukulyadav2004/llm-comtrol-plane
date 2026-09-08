@@ -5,6 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app import main as app_main
+from app.providers.base import BaseProvider
 from app.router import llm_router
 
 
@@ -26,20 +27,34 @@ def streaming_route(monkeypatch, route):
     return r
 
 
-def install_stream(monkeypatch, deltas, prompt_tokens=9, completion_tokens=4):
-    async def _fn(base_url, model, messages, max_tokens, temperature):
-        first = True
-        for d in deltas:
-            delta = {"role": "assistant", "content": d} if first else {"content": d}
-            first = False
+def install_stream(monkeypatch, deltas, prompt_tokens=9, completion_tokens=4,
+                   completion=None):
+    """Install a provider that streams `deltas` and reports the given usage."""
+    class _Stub(BaseProvider):
+        name = "ollama"
+
+        async def chat_completion(self, req):
+            if completion is None:
+                raise AssertionError("non-streaming path not stubbed for this test")
+            return completion
+
+        async def stream_chat_completion(self, req):
+            first = True
+            for d in deltas:
+                delta = {"role": "assistant", "content": d} if first else {"content": d}
+                first = False
+                yield {"id": "chatcmpl-t", "object": "chat.completion.chunk",
+                       "created": 1, "model": req.model,
+                       "choices": [{"index": 0, "delta": delta, "finish_reason": None}]}
             yield {"id": "chatcmpl-t", "object": "chat.completion.chunk", "created": 1,
-                   "model": model,
-                   "choices": [{"index": 0, "delta": delta, "finish_reason": None}]}
-        yield {"id": "chatcmpl-t", "object": "chat.completion.chunk", "created": 1,
-               "model": model,
-               "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
-               "_usage": {"prompt_tokens": prompt_tokens, "completion_tokens": completion_tokens}}
-    monkeypatch.setitem(llm_router._STREAM_PROVIDER_MAP, "ollama", _fn)
+                   "model": req.model,
+                   "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+                   "_usage": {"prompt_tokens": prompt_tokens,
+                              "completion_tokens": completion_tokens}}
+
+    stub = _Stub()
+    monkeypatch.setattr(llm_router, "get_provider", lambda name: stub)
+    return stub
 
 
 def sse_payloads(body: str):
@@ -175,12 +190,11 @@ def test_streamed_output_is_redacted_by_guardrails(client, monkeypatch, streamin
 
 
 def test_non_streaming_requests_still_return_json(client, monkeypatch, streaming_route):
-    async def _fn(base_url, model, messages, max_tokens, temperature):
-        return {"id": "x", "object": "chat.completion", "model": model,
-                "choices": [{"index": 0, "message": {"role": "assistant", "content": "plain"},
-                             "finish_reason": "stop"}],
-                "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}}
-    monkeypatch.setitem(llm_router._PROVIDER_MAP, "ollama", _fn)
+    install_stream(monkeypatch, [], completion={
+        "id": "x", "object": "chat.completion", "model": "llama3.2:1b",
+        "choices": [{"index": 0, "message": {"role": "assistant", "content": "plain"},
+                     "finish_reason": "stop"}],
+        "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}})
 
     resp = client.post("/v1/chat/completions", json={
         "model": "stream-route", "messages": [{"role": "user", "content": "hi"}]})

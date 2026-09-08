@@ -2,6 +2,7 @@
 import pytest
 
 from app.middleware.cost_tracker import get_route_stats
+from app.providers.base import BaseProvider
 from app.router import llm_router
 from app.router.llm_router import RateLimitError, RoutingError, route_request
 
@@ -31,13 +32,25 @@ def reply(text="hello", prompt_tokens=10, completion_tokens=5):
 
 
 def stub_provider(monkeypatch, behaviour):
-    """behaviour: route model/base_url -> result dict, or an exception to raise."""
-    async def _fn(base_url, model, messages, max_tokens, temperature):
-        outcome = behaviour(model)
-        if isinstance(outcome, Exception):
-            raise outcome
-        return outcome
-    monkeypatch.setitem(llm_router._PROVIDER_MAP, "ollama", _fn)
+    """Install a provider whose completion is decided by `behaviour(model)`.
+
+    behaviour returns a result dict, or an Exception instance to raise.
+    """
+    class _Stub(BaseProvider):
+        name = "ollama"
+
+        async def chat_completion(self, req):
+            outcome = behaviour(req.model)
+            if isinstance(outcome, Exception):
+                raise outcome
+            return outcome
+
+        async def stream_chat_completion(self, req):
+            yield {}
+
+    stub = _Stub()
+    monkeypatch.setattr(llm_router, "get_provider", lambda name: stub)
+    return stub
 
 
 MESSAGES = [{"role": "user", "content": "hello"}]
@@ -90,9 +103,9 @@ async def test_input_guardrail_block_surfaces_as_routing_error(monkeypatch, rout
 @pytest.mark.asyncio
 async def test_unsupported_provider_is_reported_clearly(monkeypatch, route):
     bad = route("weird")
-    bad["provider"] = "openai"
+    bad["provider"] = "not-a-real-provider"
     install_routes(monkeypatch, [bad])
-    with pytest.raises(RoutingError, match="Provider call failed|Unsupported provider"):
+    with pytest.raises(RoutingError, match="Unknown provider"):
         await route_request("weird", MESSAGES)
 
 
@@ -100,16 +113,15 @@ async def test_unsupported_provider_is_reported_clearly(monkeypatch, route):
 async def test_failing_primary_falls_back_to_its_secondary(monkeypatch, route):
     install_routes(monkeypatch, [route("primary", fallback="backup"), route("backup")])
 
-    def behaviour(model):
-        return reply("from backup")
     calls = {"n": 0}
 
-    async def _fn(base_url, model, messages, max_tokens, temperature):
+    def behaviour(model):
         calls["n"] += 1
         if calls["n"] == 1:
-            raise RuntimeError("primary down")
+            return RuntimeError("primary down")
         return reply("from backup")
-    monkeypatch.setitem(llm_router._PROVIDER_MAP, "ollama", _fn)
+
+    stub_provider(monkeypatch, behaviour)
 
     result = await route_request("primary", MESSAGES)
     assert result["choices"][0]["message"]["content"] == "from backup"
@@ -157,3 +169,41 @@ async def test_missing_provider_usage_is_estimated_not_dropped(monkeypatch, rout
     result = await route_request("est", MESSAGES)
     assert result["usage"]["total_tokens"] > 0
     assert get_route_stats("est")["total_tokens"] > 0
+
+
+# ── provider error handling ───────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_a_retryable_provider_error_does_fall_back(monkeypatch, route):
+    from app.providers.base import ProviderOverloadedError
+
+    install_routes(monkeypatch, [route("primary", fallback="backup"), route("backup")])
+    calls = {"n": 0}
+
+    def behaviour(model):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return ProviderOverloadedError("upstream busy", provider="ollama",
+                                           status_code=503)
+        return reply("from backup")
+
+    stub_provider(monkeypatch, behaviour)
+
+    result = await route_request("primary", MESSAGES)
+    assert result["choices"][0]["message"]["content"] == "from backup"
+    assert calls["n"] > 1
+
+
+@pytest.mark.asyncio
+async def test_route_credentials_are_resolved_from_the_environment(monkeypatch, route):
+    """The key reaches the provider without ever being stored in route config."""
+    from app.router.llm_router import build_provider_request
+
+    monkeypatch.setenv("GROQ_API_KEY", "gsk_from_env")
+    r = route("groq")
+    r["provider"] = "openai_compatible"
+    r["api_key_env"] = "GROQ_API_KEY"
+
+    _provider, req = build_provider_request(r, MESSAGES)
+    assert req.api_key == "gsk_from_env"
+    assert "gsk_from_env" not in str(r), "the secret must not land in route config"
