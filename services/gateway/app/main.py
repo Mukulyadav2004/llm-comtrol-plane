@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import time
 from typing import Any, Dict, List, Optional
@@ -6,7 +7,7 @@ from typing import Any, Dict, List, Optional
 import structlog
 from fastapi import Depends, FastAPI, HTTPException, Header, Request, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from prometheus_client import Counter, Histogram, make_asgi_app
 from pydantic import BaseModel
 
@@ -15,7 +16,13 @@ from app.middleware.auth import require_api_key
 from app.middleware.cost_tracker import get_all_stats, get_route_stats
 from app.middleware.latency_tracker import get_stats as get_latency_stats
 from app.router.config_store import list_routes, get_semantic_rules, poll_config, refresh_config
-from app.router.llm_router import RateLimitError, RoutingError, route_request
+from app.router.llm_router import (
+    RateLimitError,
+    RoutingError,
+    prepare_request,
+    route_request,
+    stream_request,
+)
 
 log = structlog.get_logger()
 
@@ -63,6 +70,12 @@ class ChatRequest(BaseModel):
     # Optional parent trace id (e.g. an agent session) so this call nests
     # under one end-to-end trace instead of producing a standalone one.
     parent_trace_id: Optional[str] = None
+    # OpenAI's stream_options.include_usage: emit a final usage-only chunk.
+    stream_options: Optional[Dict[str, Any]] = None
+
+    @property
+    def include_usage(self) -> bool:
+        return bool((self.stream_options or {}).get("include_usage"))
 
     def resolved_route(self) -> str:
         name = self.model or self.route
@@ -83,28 +96,88 @@ class ChatResponse(BaseModel):
     _route: Optional[str] = None
 
 
-@app.post("/v1/chat/completions", response_model=ChatResponse)
+@app.post("/v1/chat/completions")
 async def chat(req: ChatRequest, request: Request, api_key: str = Depends(require_api_key)):
     route_name = req.resolved_route()
     # Prefer the authenticated key for rate-limit attribution; fall back to IP.
     client_id = api_key if api_key != "anonymous" else (request.client.host if request.client else "unknown")
+
+    if req.stream:
+        return await _chat_stream(req, route_name, client_id)
+
     with REQUEST_LATENCY.labels(route=route_name).time():
         try:
             result = await route_request(
                 route_name=route_name,
                 messages=[m.model_dump() for m in req.messages],
                 client_id=client_id,
-                stream=req.stream,
                 parent_trace_id=req.parent_trace_id,
             )
             REQUEST_COUNT.labels(route=route_name, status="success").inc()
             return JSONResponse(content=result)
         except RateLimitError as exc:
             REQUEST_COUNT.labels(route=route_name, status="rate_limited").inc()
-            raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=str(exc))
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=str(exc),
+                headers={"Retry-After": str(exc.retry_after_seconds)},
+            )
         except RoutingError as exc:
             REQUEST_COUNT.labels(route=route_name, status="error").inc()
             raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
+
+
+async def _chat_stream(req: "ChatRequest", route_name: str, client_id: str) -> StreamingResponse:
+    """Server-sent events, OpenAI `chat.completion.chunk` format.
+
+    Preparation (route resolution, rate limiting, input guardrails) runs *before*
+    the StreamingResponse is constructed. Once the body has started the status
+    line is already on the wire, so a 429 or 502 raised later would reach the
+    client as a broken stream instead of an error.
+    """
+    try:
+        prepared = await prepare_request(
+            route_name=route_name,
+            messages=[m.model_dump() for m in req.messages],
+            client_id=client_id,
+        )
+    except RateLimitError as exc:
+        REQUEST_COUNT.labels(route=route_name, status="rate_limited").inc()
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=str(exc),
+            headers={"Retry-After": str(exc.retry_after_seconds)},
+        )
+    except RoutingError as exc:
+        REQUEST_COUNT.labels(route=route_name, status="error").inc()
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
+
+    async def event_stream():
+        try:
+            async for chunk in stream_request(prepared, parent_trace_id=req.parent_trace_id):
+                # Usage-only trailer is opt-in, matching OpenAI's stream_options.
+                if chunk.get("usage") is not None and not req.include_usage:
+                    continue
+                yield f"data: {json.dumps(chunk)}\n\n"
+            REQUEST_COUNT.labels(route=prepared.route_name, status="success").inc()
+        except Exception as exc:  # never leave a stream hanging open
+            log.warning("gateway.stream_failed", error=str(exc))
+            REQUEST_COUNT.labels(route=prepared.route_name, status="error").inc()
+            error = {"error": {"message": str(exc), "type": "gateway_error"}}
+            yield f"data: {json.dumps(error)}\n\n"
+        finally:
+            yield "data: [DONE]\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            # Stop nginx buffering the stream into one blob at the edge.
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @app.get("/v1/models")
