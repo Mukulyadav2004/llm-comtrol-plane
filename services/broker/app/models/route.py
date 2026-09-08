@@ -16,10 +16,18 @@ class LLMRoute(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(String(256), nullable=False, unique=True, index=True)
-    provider: Mapped[str] = mapped_column(String(64), nullable=False)  # ollama | openai | anthropic
+    # Must name a provider registered in the gateway: see
+    # services/gateway/app/providers/__init__.py
+    provider: Mapped[str] = mapped_column(String(64), nullable=False)
     model: Mapped[str] = mapped_column(String(256), nullable=False)
     base_url: Mapped[str] = mapped_column(String(512), nullable=True)
-    api_key_secret: Mapped[str] = mapped_column(String(512), nullable=True)
+    # The NAME of an environment variable the gateway reads, never the key
+    # itself. Route config is cached in Redis and served over /v2/routes and
+    # /config/gateway; a credential stored here would come to rest in all
+    # three in plaintext.
+    api_key_env: Mapped[str] = mapped_column(String(256), nullable=True)
+    # Provider-specific passthrough (top_p, seed, include_usage, ...).
+    provider_options: Mapped[dict] = mapped_column(JSON, default=dict)
 
     # Policy
     max_tokens: Mapped[int] = mapped_column(Integer, default=4096)

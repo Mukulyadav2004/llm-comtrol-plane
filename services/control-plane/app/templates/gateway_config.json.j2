@@ -8,6 +8,8 @@
       "provider": "{{ route.provider }}",
       "model": "{{ route.model }}",
       "base_url": "{{ route.base_url or '' }}",
+      "api_key_env": {{ ('"' + route.api_key_env + '"') if route.api_key_env else 'null' }},
+      "provider_options": {{ (route.provider_options or {}) | tojson }},
       "policy": {
         "max_tokens": {{ route.max_tokens }},
         "temperature": {{ route.temperature }},
