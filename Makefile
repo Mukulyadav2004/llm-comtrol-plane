@@ -8,6 +8,9 @@ up:
 down:
 	$(COMPOSE) down -v
 
+test:
+	pip install -q -r requirements-dev.txt && cd services/gateway && pytest tests -v
+
 build:
 	$(COMPOSE) build
 
