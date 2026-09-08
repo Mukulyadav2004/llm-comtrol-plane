@@ -127,6 +127,62 @@ and the first one is already on the wire.
 
 ---
 
+## Providers
+
+Every backend is reached through one interface (`app/providers/base.py`), so the
+router never learns a provider's name. Adding one means writing a subclass, not
+editing the router.
+
+| `provider` | Reaches | Key from |
+|---|---|---|
+| `ollama` | a local Ollama | — |
+| `openai_compatible` | OpenAI, Groq, Together, Fireworks, DeepInfra, vLLM, LM Studio | `OPENAI_API_KEY` by default |
+| `anthropic` | the Messages API | `ANTHROPIC_API_KEY` |
+
+`GET /v1/providers` reports what this build can serve, which is the quickest way
+to tell a provisioning problem from a routing one.
+
+### Credentials never live in route config
+
+A route names the **environment variable** holding its key, never the key:
+
+```json
+{
+  "provider": "openai_compatible",
+  "model": "llama-3.3-70b-versatile",
+  "base_url": "https://api.groq.com/openai/v1",
+  "api_key_env": "GROQ_API_KEY"
+}
+```
+
+Route config is stored in Postgres, rendered by the Control Plane, cached in
+Redis and served over `/v2/routes` and `/config/gateway`. A key placed in it
+would come to rest in plaintext in all of those. Passing the variable's name
+keeps the secret in the gateway's own environment. Naming a variable that is
+unset fails the request immediately rather than sending it unauthenticated and
+surfacing a confusing 401 from a third party.
+
+### Adding a Groq route
+
+```bash
+export GROQ_API_KEY=gsk_...        # on the gateway container
+```
+
+```bash
+curl -X PUT localhost:8000/v2/service_instances/groq-fast \
+  -H 'Content-Type: application/json' \
+  -d '{"service_id":"llm-route","plan_id":"ollama-basic","instance_id":"groq-fast",
+       "parameters":{"name":"groq-fast","provider":"openai_compatible",
+                     "model":"llama-3.3-70b-versatile",
+                     "base_url":"https://api.groq.com/openai/v1",
+                     "api_key_env":"GROQ_API_KEY","rate_limit_rpm":30}}'
+```
+
+The same route shape works for Together, Fireworks, DeepInfra or a local vLLM —
+change `base_url` and `api_key_env`.
+
+---
+
 ## Run it
 
 **Prerequisites:** Docker + Docker Compose, Make
@@ -203,9 +259,10 @@ cd services/gateway && pytest tests -v      # or, from the repo root: make test
 The suite imports the gateway package, so it needs the service's runtime
 dependencies as well as the test-only ones.
 
-71 tests covering the router's fallback and cycle handling, guardrail
+146 tests covering the router's fallback and cycle handling, provider
+adapters and error classification, credential resolution, hedging, guardrail
 redaction placement, rate-limit window semantics, cost math, token accounting,
-and the SSE contract end-to-end. They run against `fakeredis`, so no services
+and the SSE contract end-to-end. 28 of them are the xfailed Anthropic spec. They run against `fakeredis`, so no services
 need to be up. CI runs them on every push, alongside a build of all eight
 images.
 
@@ -228,9 +285,11 @@ make gateway-observability   # confirm the gateway picked it up
 
 Being explicit about what this does *not* do yet:
 
-- **One provider.** Only Ollama is wired into the gateway's provider map. The
-  Broker's schema accepts `openai`/`anthropic`/`google`, but provisioning one of
-  those produces a route the gateway will reject at request time.
+- **Anthropic is unimplemented.** The adapter is a stub; `tests/test_anthropic_provider.py`
+  specifies it and is marked xfail until it is written. Ollama and any
+  OpenAI-compatible endpoint work today.
+- **No tool/function calling.** The chat endpoint does not accept `tools`, so
+  MCP tools are reachable only through the Agent Gateway's ReAct loop.
 - **Cost is a blended rate.** `cost_per_1k_tokens` is a single number applied to
   prompt + completion together; real pricing separates input, output and cached
   tokens.
@@ -241,8 +300,6 @@ Being explicit about what this does *not* do yet:
   RPM only — there is no TPM limit.
 - **No response caching, retries, or deployment pools.** A route maps to exactly
   one model at one URL.
-- **No tool/function calling.** The chat endpoint does not accept `tools`, so
-  MCP tools are reachable only through the Agent Gateway's ReAct loop.
 - **Guardrails are regex-based.** A useful backstop, not a substitute for a real
   PII or prompt-injection engine.
 
@@ -258,6 +315,7 @@ safe to expose:
 | `GATEWAY_REQUIRE_AUTH` | `false` — any key works | `true`, with `GATEWAY_API_KEYS` set |
 | `GATEWAY_CORS_ORIGINS` | `*` | your dashboard's origin only |
 | `GATEWAY_JWT_SECRET` | `change-me-in-production` | a real secret from your secret store |
+| provider API keys | read from env at request time | inject as container secrets, never in route config |
 
 ---
 
