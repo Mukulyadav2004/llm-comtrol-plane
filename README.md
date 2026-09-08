@@ -195,9 +195,13 @@ make latency
 ## Tests
 
 ```bash
-pip install -r requirements-dev.txt
-cd services/gateway && pytest tests -v      # or: make test
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r services/gateway/requirements.txt -r requirements-dev.txt
+cd services/gateway && pytest tests -v      # or, from the repo root: make test
 ```
+
+The suite imports the gateway package, so it needs the service's runtime
+dependencies as well as the test-only ones.
 
 71 tests covering the router's fallback and cycle handling, guardrail
 redaction placement, rate-limit window semantics, cost math, token accounting,
