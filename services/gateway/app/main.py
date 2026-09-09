@@ -18,7 +18,9 @@ from app.middleware.cost_tracker import get_all_stats, get_route_stats
 from app.middleware.latency_tracker import get_stats as get_latency_stats
 from app.router.config_store import list_routes, get_semantic_rules, poll_config, refresh_config
 from app.router.llm_router import (
+    GatewayConfigError,
     RateLimitError,
+    RateLimiterUnavailableError,
     RoutingError,
     prepare_request,
     route_request,
@@ -116,6 +118,19 @@ async def chat(req: ChatRequest, request: Request, api_key: str = Depends(requir
             )
             REQUEST_COUNT.labels(route=route_name, status="success").inc()
             return JSONResponse(content=result)
+        except GatewayConfigError as exc:
+            REQUEST_COUNT.labels(route=route_name, status="misconfigured").inc()
+            log.error("gateway.misconfigured route=%s error=%s", route_name, exc)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)
+            )
+        except RateLimiterUnavailableError as exc:
+            REQUEST_COUNT.labels(route=route_name, status="limiter_unavailable").inc()
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=str(exc),
+                headers={"Retry-After": "5"},
+            )
         except RateLimitError as exc:
             REQUEST_COUNT.labels(route=route_name, status="rate_limited").inc()
             raise HTTPException(
@@ -141,6 +156,19 @@ async def _chat_stream(req: "ChatRequest", route_name: str, client_id: str) -> S
             route_name=route_name,
             messages=[m.model_dump() for m in req.messages],
             client_id=client_id,
+        )
+    except GatewayConfigError as exc:
+        REQUEST_COUNT.labels(route=route_name, status="misconfigured").inc()
+        log.error("gateway.misconfigured route=%s error=%s", route_name, exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)
+        )
+    except RateLimiterUnavailableError as exc:
+        REQUEST_COUNT.labels(route=route_name, status="limiter_unavailable").inc()
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+            headers={"Retry-After": "5"},
         )
     except RateLimitError as exc:
         REQUEST_COUNT.labels(route=route_name, status="rate_limited").inc()

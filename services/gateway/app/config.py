@@ -34,6 +34,14 @@ class Settings(BaseSettings):
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()] or ["*"]
 
+    # What the rate limiter does when Redis is unreachable.
+    #   "local"  — each replica enforces the limit in-process (default).
+    #              Accuracy degrades to ~N x limit across N replicas; the
+    #              gateway stays up and spend stays bounded.
+    #   "open"   — admit everything. Available, but spend is uncapped.
+    #   "closed" — reject everything with a 503. Spend is capped, gateway down.
+    rate_limit_degraded_mode: str = "local"
+
     # Default upstream timeout in seconds; a route may override it with
     # policy.timeout_seconds.
     request_timeout: float = 120.0

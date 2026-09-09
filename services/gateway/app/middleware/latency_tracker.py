@@ -12,6 +12,7 @@ from typing import Dict, List, Optional
 import redis as redis_lib
 
 from app.config import settings
+from app.middleware.redis_safety import redis_safe
 
 _redis = redis_lib.from_url(settings.redis_url, decode_responses=True)
 
@@ -19,6 +20,7 @@ _WINDOW_SECONDS = 300  # 5 minutes
 _MAX_SAMPLES = 500     # cap per route to bound memory
 
 
+@redis_safe(operation="record_latency")
 def record_latency(route_name: str, duration_ms: float) -> None:
     key = f"latency:{route_name}"
     now = time.time()
@@ -32,6 +34,7 @@ def record_latency(route_name: str, duration_ms: float) -> None:
     pipe.execute()
 
 
+@redis_safe(None, operation="get_percentile")
 def get_percentile(route_name: str, percentile: float = 0.95) -> Optional[float]:
     """Return P{percentile*100} latency in ms over the last 5 minutes, or None if no data."""
     key = f"latency:{route_name}"
@@ -44,6 +47,10 @@ def get_percentile(route_name: str, percentile: float = 0.95) -> Optional[float]
     return durations[min(idx, len(durations) - 1)]
 
 
+@redis_safe(
+    lambda: {"p50_ms": None, "p95_ms": None, "p99_ms": None, "sample_count": 0},
+    operation="get_latency_stats",
+)
 def get_stats(route_name: str) -> Dict[str, Optional[float]]:
     key = f"latency:{route_name}"
     now = time.time()

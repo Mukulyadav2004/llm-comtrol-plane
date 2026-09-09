@@ -259,10 +259,12 @@ cd services/gateway && pytest tests -v      # or, from the repo root: make test
 The suite imports the gateway package, so it needs the service's runtime
 dependencies as well as the test-only ones.
 
-146 tests covering the router's fallback and cycle handling, provider
+180 tests covering the router's fallback and cycle handling, provider
 adapters and error classification, credential resolution, hedging, guardrail
 redaction placement, rate-limit window semantics, cost math, token accounting,
-and the SSE contract end-to-end. 28 of them are the xfailed Anthropic spec. They run against `fakeredis`, so no services
+the SSE contract end-to-end, and each dependency's failure mode. 28 of them
+are the xfailed Anthropic spec. The MCP gateway has its own suite under
+`services/mcp-gateway/tests`. They run against `fakeredis`, so no services
 need to be up. CI runs them on every push, alongside a build of all eight
 images.
 
@@ -278,6 +280,34 @@ To ship traces to an external backend:
 make provision-langfuse      # or langsmith / braintrust
 make gateway-observability   # confirm the gateway picked it up
 ```
+
+---
+
+## Failure modes
+
+What happens when a dependency is down, decided rather than discovered:
+
+| Dependency | Effect |
+|---|---|
+| Redis, for latency and cost | Requests are served normally. The counters lose samples and `gateway_redis_errors_total` climbs. Telemetry is never in the request's failure path. |
+| Redis, for rate limiting | Governed by `GATEWAY_RATE_LIMIT_DEGRADED_MODE`. |
+| An upstream provider | Retryable failures (429, 5xx, timeouts) fall back to the route's `fallback`. Non-retryable ones (400, 401) do not — the fallback would fail identically and bill a second call. |
+| A route's `api_key_env` unset | `500`, before the request leaves the gateway. It is our misconfiguration, not an upstream fault. |
+
+`GATEWAY_RATE_LIMIT_DEGRADED_MODE` picks which failure you prefer when the
+shared limiter is unreachable:
+
+| Mode | Accuracy | Availability | Spend |
+|---|---|---|---|
+| `local` (default) | ~N x limit across N replicas | up | bounded |
+| `open` | none | up | **unbounded** |
+| `closed` | n/a | **down** (503) | capped |
+
+`local` keeps a per-process sliding window, so a Redis outage degrades the
+limit's precision rather than the gateway's availability or its cost ceiling. A
+`503` from `closed` mode is deliberately not a `429` — telling a caller they
+exceeded a quota they did not exceed sends them to back off instead of to
+whoever owns Redis.
 
 ---
 

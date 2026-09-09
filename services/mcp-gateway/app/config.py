@@ -7,6 +7,11 @@ class Settings(BaseSettings):
 
     control_plane_url: str = "http://control-plane:8001"
     redis_url: str = "redis://redis:6379/0"
+
+    # What the tool rate limiter does when Redis is unreachable:
+    #   "local" (default) per-process limiting, "open" allow all,
+    #   "closed" deny all. See app/middleware/rate_limit.py.
+    rate_limit_degraded_mode: str = "local"
     config_poll_interval: int = 30
 
     # Used by intelligent routing / argument extraction. The MCP Gateway calls the

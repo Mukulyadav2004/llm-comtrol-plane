@@ -21,10 +21,15 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r services/gateway/requirements.txt
+          pip install -r services/mcp-gateway/requirements.txt
           pip install -r requirements-dev.txt
 
-      - name: Run tests
+      - name: LLM gateway
         working-directory: services/gateway
+        run: pytest tests -v
+
+      - name: MCP gateway
+        working-directory: services/mcp-gateway
         run: pytest tests -v
 
   build-images:

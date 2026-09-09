@@ -38,7 +38,12 @@ from app.middleware.observability.tracer import dispatch_trace
 from app.middleware.rate_limit import check_rate_limit_detailed
 from app.middleware.stream_guard import StreamGuard
 from app.middleware.token_counter import resolve_usage
-from app.providers import ProviderError, ProviderRequest, get_provider
+from app.providers import (
+    ProviderAuthError,
+    ProviderError,
+    ProviderRequest,
+    get_provider,
+)
 from app.providers.credentials import resolve_api_key
 from app.router.classifier import classify_intent
 from app.router.config_store import (
@@ -56,7 +61,25 @@ MAX_FALLBACK_DEPTH = 3
 
 
 class RoutingError(Exception):
-    pass
+    """The upstream could not serve this request. Maps to 502."""
+
+
+class GatewayConfigError(Exception):
+    """This gateway cannot serve the route because *its own* config is wrong.
+
+    An unset api_key_env or an unregistered provider name is not an upstream
+    fault — nothing was ever sent upstream. Reporting it as 502 Bad Gateway
+    points the operator at the wrong system. Maps to 500.
+    """
+
+
+class RateLimiterUnavailableError(Exception):
+    """The shared limiter is unreachable and the policy is to reject.
+
+    Distinct from RateLimitError on purpose: telling a caller they exceeded a
+    quota they did not exceed is a lie, and sends them to the wrong fix. Maps
+    to 503.
+    """
 
 
 class RateLimitError(Exception):
@@ -99,11 +122,23 @@ async def prepare_request(
     if not route:
         raise RoutingError(f"Route '{resolved_route}' not found or disabled")
 
+    # Settle "can this gateway serve the route at all" before spending a rate
+    # limit slot or touching an upstream. It also has to happen here rather than
+    # at call time so the streaming path reports it as a status code: once the
+    # SSE body is open, a config error can only arrive as a 200 with an error
+    # chunk in it.
+    assert_route_is_servable(route)
+
     policy = route.get("policy", {}) or {}
     decision = check_rate_limit_detailed(
         resolved_route, policy.get("rate_limit_rpm", 60), client_id
     )
     if not decision.allowed:
+        if decision.degraded:
+            raise RateLimiterUnavailableError(
+                "Rate limiter backend is unavailable and the gateway is "
+                "configured to reject requests while it is down."
+            )
         raise RateLimitError(
             f"Rate limit exceeded for route '{resolved_route}' "
             f"({decision.current}/{decision.limit} rpm)",
@@ -161,22 +196,26 @@ async def route_request(
             raise RoutingError(f"Route '{rname}' not found")
         return await _provider_call(r, msgs)
 
+    hedging = bool(hedge_route and hedge_route != resolved_route)
     start = time.monotonic()
     try:
-        if hedge_route and hedge_route != resolved_route:
+        if hedging:
+            # hedged_call records latency internally for whichever route won.
             result = await hedged_call(
                 primary_route_name=resolved_route,
                 messages=messages,
                 call_fn=_call,
                 hedge_route_name=hedge_route,
             )
-            # hedged_call records latency internally; skip double-recording.
         else:
             result = await _call(resolved_route, messages)
-            record_latency(resolved_route, (time.monotonic() - start) * 1000)
 
     except Exception as exc:
         log.warning("gateway.provider_error route=%s error=%s", resolved_route, exc)
+        # The gateway's own misconfiguration is not something a second upstream
+        # can fix, and must not be reported as an upstream failure.
+        if isinstance(exc, GatewayConfigError):
+            raise
         # A 400 or a bad API key will fail identically on the fallback route, so
         # trying it just burns a second upstream and doubles the latency of an
         # error the caller has to fix anyway. Only retryable failures fall back.
@@ -192,6 +231,14 @@ async def route_request(
                 _visited=visited | {resolved_route},
             )
         raise RoutingError(f"Provider call failed: {exc}") from exc
+
+    # Telemetry lives outside the try. Inside it, a Redis blip during
+    # record_latency was caught by the `except` above, reported as a provider
+    # error, and — not being a non-retryable ProviderError — fell through to the
+    # fallback route, discarding a response that had already succeeded and
+    # billing a second upstream call for it.
+    if not hedging:
+        record_latency(resolved_route, (time.monotonic() - start) * 1000)
 
     output_text = result["choices"][0]["message"]["content"]
     try:
@@ -405,11 +452,7 @@ def build_provider_request(route: Dict, messages: List) -> tuple:
     a secret never reaches the Broker, the Control Plane, or the Redis cache the
     config is served from. See app/providers/credentials.py.
     """
-    try:
-        provider = get_provider(route["provider"])
-    except KeyError as exc:
-        raise RoutingError(str(exc)) from exc
-
+    provider = _resolve_provider(route)
     policy = route.get("policy", {}) or {}
     req = ProviderRequest(
         model=route["model"],
@@ -418,11 +461,30 @@ def build_provider_request(route: Dict, messages: List) -> tuple:
         temperature=policy.get("temperature", 0.7),
         stop=policy.get("stop"),
         base_url=route.get("base_url") or None,
-        api_key=resolve_api_key(provider, route),
+        api_key=_resolve_credential(provider, route),
         timeout=float(policy.get("timeout_seconds", settings.request_timeout)),
         extra=route.get("provider_options", {}) or {},
     )
     return provider, req
+
+
+def _resolve_provider(route: Dict) -> Any:
+    try:
+        return get_provider(route["provider"])
+    except KeyError as exc:
+        raise GatewayConfigError(str(exc)) from exc
+
+
+def _resolve_credential(provider: Any, route: Dict) -> Optional[str]:
+    try:
+        return resolve_api_key(provider, route)
+    except ProviderAuthError as exc:
+        raise GatewayConfigError(str(exc)) from exc
+
+
+def assert_route_is_servable(route: Dict) -> None:
+    """Raise GatewayConfigError if this build cannot serve the route as written."""
+    _resolve_credential(_resolve_provider(route), route)
 
 
 async def _provider_call(route: Dict, messages: List) -> Dict[str, Any]:

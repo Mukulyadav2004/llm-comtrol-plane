@@ -116,11 +116,26 @@ def test_an_upstream_401_is_reported_as_a_gateway_error(client, groq_route, mock
     assert "invalid api key" in resp.json()["detail"]
 
 
-def test_a_route_naming_a_missing_env_var_fails_fast(client, groq_route, monkeypatch):
-    """Better a clear gateway error than an unauthenticated request and a
-    third-party 401 the operator has to go read logs to understand."""
+def test_a_route_naming_a_missing_env_var_is_a_500_not_a_502(
+    client, groq_route, monkeypatch
+):
+    """502 Bad Gateway would blame an upstream that was never contacted, and
+    send whoever is on call to read the wrong system's logs."""
     monkeypatch.delenv("GROQ_API_KEY", raising=False)
     resp = client.post("/v1/chat/completions", json={
         "model": "groq-fast", "messages": [{"role": "user", "content": "hi"}]})
-    assert resp.status_code == 502
+    assert resp.status_code == 500
+    assert "GROQ_API_KEY" in resp.json()["detail"]
+
+
+def test_a_missing_key_on_the_streaming_path_is_also_a_real_status_code(
+    client, groq_route, monkeypatch
+):
+    """The credential check runs pre-flight, so this is a 500 rather than a 200
+    whose SSE body happens to contain an error chunk."""
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    resp = client.post("/v1/chat/completions", json={
+        "model": "groq-fast", "stream": True,
+        "messages": [{"role": "user", "content": "hi"}]})
+    assert resp.status_code == 500
     assert "GROQ_API_KEY" in resp.json()["detail"]

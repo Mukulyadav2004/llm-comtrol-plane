@@ -7,17 +7,19 @@ this to an append-only Postgres table is the next step, not this one.
 """
 from __future__ import annotations
 
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import redis as redis_lib
 
 from app.config import settings
+from app.middleware.redis_safety import redis_safe
 
 _redis = redis_lib.from_url(settings.redis_url, decode_responses=True)
 
 _SCAN_BATCH = 500
 
 
+@redis_safe(operation="record_usage")
 def record_usage(
     route_name: str,
     prompt_tokens: int,
@@ -36,14 +38,21 @@ def record_usage(
     pipe.execute()
 
 
-def get_route_stats(route_name: str) -> Dict[str, float]:
+@redis_safe(lambda: [None] * 5, operation="get_route_stats")
+def _read_counters(route_name: str) -> List[Optional[str]]:
     pipe = _redis.pipeline()
     pipe.get(f"cost:{route_name}:total_usd")
     pipe.get(f"cost:{route_name}:total_tokens")
     pipe.get(f"cost:{route_name}:prompt_tokens")
     pipe.get(f"cost:{route_name}:completion_tokens")
     pipe.get(f"cost:{route_name}:requests")
-    usd, total, prompt, completion, requests = pipe.execute()
+    return pipe.execute()
+
+
+def get_route_stats(route_name: str) -> Dict[str, float]:
+    """Counters for one route. Reports zeroes rather than raising when Redis is
+    unreachable — a dashboard with a gap in it beats a dashboard that 500s."""
+    usd, total, prompt, completion, requests = _read_counters(route_name)
 
     return {
         "route": route_name,
@@ -55,6 +64,7 @@ def get_route_stats(route_name: str) -> Dict[str, float]:
     }
 
 
+@redis_safe(list, operation="list_tracked_routes")
 def list_tracked_routes() -> List[str]:
     """Route names with recorded usage.
 

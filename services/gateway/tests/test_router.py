@@ -4,7 +4,12 @@ import pytest
 from app.middleware.cost_tracker import get_route_stats
 from app.providers.base import BaseProvider
 from app.router import llm_router
-from app.router.llm_router import RateLimitError, RoutingError, route_request
+from app.router.llm_router import (
+    GatewayConfigError,
+    RateLimitError,
+    RoutingError,
+    route_request,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -105,7 +110,9 @@ async def test_unsupported_provider_is_reported_clearly(monkeypatch, route):
     bad = route("weird")
     bad["provider"] = "not-a-real-provider"
     install_routes(monkeypatch, [bad])
-    with pytest.raises(RoutingError, match="Unknown provider"):
+    # A provider this build does not register is our misconfiguration, not an
+    # upstream failure — nothing was ever sent upstream.
+    with pytest.raises(GatewayConfigError, match="Unknown provider"):
         await route_request("weird", MESSAGES)
 
 
