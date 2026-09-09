@@ -2,7 +2,7 @@
 
 Routes never carry a secret. They carry the *name* of an environment variable:
 
-    {"provider": "openai_compatible", "model": "llama-3.3-70b-versatile",
+    {"provider": "openai_compatible", "model": "openai/gpt-oss-20b",
      "base_url": "https://api.groq.com/openai/v1", "api_key_env": "GROQ_API_KEY"}
 
 That constraint is deliberate. Route config is authored in the Broker, rendered

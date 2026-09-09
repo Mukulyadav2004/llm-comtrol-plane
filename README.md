@@ -149,7 +149,7 @@ A route names the **environment variable** holding its key, never the key:
 ```json
 {
   "provider": "openai_compatible",
-  "model": "llama-3.3-70b-versatile",
+  "model": "openai/gpt-oss-20b",
   "base_url": "https://api.groq.com/openai/v1",
   "api_key_env": "GROQ_API_KEY"
 }
@@ -173,7 +173,7 @@ curl -X PUT localhost:8000/v2/service_instances/groq-fast \
   -H 'Content-Type: application/json' \
   -d '{"service_id":"llm-route","plan_id":"ollama-basic","instance_id":"groq-fast",
        "parameters":{"name":"groq-fast","provider":"openai_compatible",
-                     "model":"llama-3.3-70b-versatile",
+                     "model":"openai/gpt-oss-20b",
                      "base_url":"https://api.groq.com/openai/v1",
                      "api_key_env":"GROQ_API_KEY","rate_limit_rpm":30}}'
 ```
