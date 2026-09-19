@@ -5,16 +5,40 @@ public URL belongs to **dashboard only**; everything else uses Railway private
 networking. The local Ollama container is intentionally omitted on Railway.
 The hosted demo uses Groq's OpenAI-compatible API instead.
 
-## Current account status
+## Trial deployment (five-service limit)
 
-The `llm-control-plane` Railway project has been created and linked locally.
-On 19 September 2026, Railway refused to add Postgres with **“Free plan resource
-provision limit exceeded.”** The project has no deployed services yet. Upgrade
-the Railway plan or free eligible resources in your account before continuing.
-Do not point this project at the existing `openweave` database: Railway private
-networking is scoped to a project and environment.
+Railway trial projects are limited to five services and each service has a
+1 GB memory ceiling. The account identified by the avatar supplied for this
+deployment uses this compact layout:
 
-## Deploy after the resource limit is lifted
+| Railway service | Code | Purpose |
+|---|---|---|
+| Postgres | Railway database | Durable routes and registrations |
+| Redis | Railway database | Config cache, rate limits, Celery queue |
+| broker | `/services/broker` | API and database migrations |
+| worker | root [`Dockerfile`](../Dockerfile) | Control Plane, three gateways, two MCP tool servers, Celery worker/beat as separate processes |
+| dashboard | `/services/dashboard` | Only public service |
+
+This layout is for a low-traffic portfolio demo, **not production isolation**.
+The root image is smoke-tested locally; all six internal `/health` endpoints
+returned 200 and it used about 380 MB at idle. Configure `broker` with
+`DATABASE_URL`, `SYNC_DATABASE_URL`, Redis/Celery URLs, and
+`CONTROL_PLANE_URL=http://worker.railway.internal:8001`. Configure `worker`
+with the same sync database and Redis/Celery URLs, `GROQ_API_KEY`,
+`BROKER_URL=http://broker.railway.internal:8000`, and its internal gateway URLs
+pointing to `127.0.0.1` on ports 8001, 8002, and 8005. Set the dashboard's
+backend URLs to `worker.railway.internal` on their respective ports, and set
+`HOSTED_DEMO_SEED=1`, `MCP_UTILITY_URL` (port 8101),
+`MCP_KNOWLEDGE_URL` (port 8102), and a private `DASHBOARD_PASSWORD`.
+
+Only give the **dashboard** a public domain (target port 8080). Its startup
+seeds a Groq model route and two MCP tool registrations. Check that all five
+dashboard health checks are green, then send a Playground request and verify
+Usage updates. Monitor Railway/Groq usage; pause the demo when not needed.
+
+The larger, fully separated layout below requires a higher service limit.
+
+## Fully separated deployment (higher service limit)
 
 1. In the linked project, add Railway **Postgres** and **Redis** databases. The
    service names below assume Railway names them `Postgres` and `Redis`.
