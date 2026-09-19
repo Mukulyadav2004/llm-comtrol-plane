@@ -1,6 +1,10 @@
 # LLM Control Plane
 
-A self-hosted AI gateway you run on your own infrastructure. Configure routes, guardrails, and tool integrations once — every request goes through a consistent pipeline with rate limiting, cost tracking, and tracing.
+A self-hostable AI gateway that gives applications one OpenAI-compatible API for models, tools, and agents. Routes, rate limits, guardrails, cost tracking, and tracing are managed centrally.
+
+![LLM Control Plane architecture](assets/architecture.svg)
+
+**At a glance:** Python · FastAPI · Docker · PostgreSQL · Redis · Celery · OpenAI-compatible API · MCP · Prometheus
 
 ## 90-second demo
 
@@ -18,44 +22,6 @@ request through semantic routing. **Routes** shows the provisioned model and
 ---
 
 ## How it works
-
-```
-  You
-   │
-   ▼
-┌──────────────┐    declares config    ┌─────────────────┐
-│    Broker    │ ──────────────────► │  Control Plane  │
-│   :8000      │                      │     :8001       │
-│              │    stores in          │                 │
-│  catalog +   │    PostgreSQL         │  renders config │
-│  provisioner │                      │  caches in Redis│
-└──────────────┘                      └────────┬────────┘
-                                               │
-                              polls for config │
-                     ┌─────────────────────────┤
-                     │             │           │
-                     ▼             ▼           ▼
-              ┌────────────┐ ┌──────────┐ ┌──────────────┐
-              │    LLM     │ │   MCP    │ │    Agent     │
-              │  Gateway   │ │ Registry │ │   Gateway    │
-              │   :8002    │ │  :8003   │ │    :8004     │
-              │            │ │          │ │              │
-              │ route →    │ │ discover │ │ ReAct loop:  │
-              │ rate limit │ │ + proxy  │ │ think → act  │
-              │ guardrails │ │  tools   │ │ → think …    │
-              │ → Ollama   │ └────┬─────┘ └──────┬───────┘
-              └────────────┘     │               │
-                     ▲           ▼               ▼
-                     │    ┌────────────┐  calls LLM Gateway
-                     │    │    MCP     │  calls MCP Gateway
-                     │    │  Gateway   │
-                     │    │   :8005    │
-                     │    │            │
-                     │    │ auth + rate│
-                     └────│ limit tool │
-                          │   calls    │
-                          └────────────┘
-```
 
 **Data flows top-to-bottom:** Broker holds your config → Control Plane renders and distributes it → the three gateways pull it and serve live traffic.
 
@@ -89,7 +55,12 @@ The dashboard is a small FastAPI backend-for-frontend serving a single static
 page. It reaches the other services over the internal Docker network, so backend
 ports stay off the browser and there's no CORS to configure.
 
+**Verified locally:** OpenAI-compatible chat, MCP tool calls, all five dashboard health checks, 170 passing gateway tests, and 9 passing MCP gateway tests. This is a portfolio prototype, not a hardened public deployment.
+
 ---
+
+<details>
+<summary><strong>Technical details, tests, limitations, and security notes</strong></summary>
 
 ## OpenAI-compatible API
 
@@ -204,7 +175,7 @@ change `base_url` and `api_key_env`.
 # 1. Build images
 make build
 
-# 2. Start everything (Postgres, Redis, Ollama + all 6 services)
+# 2. Start the platform (Postgres, Redis, Ollama, and application services)
 make up
 
 # 3. Run database migrations
@@ -272,11 +243,11 @@ cd services/gateway && pytest tests -v      # or, from the repo root: make test
 The suite imports the gateway package, so it needs the service's runtime
 dependencies as well as the test-only ones.
 
-180 tests covering the router's fallback and cycle handling, provider
+170 passing gateway tests covering the router's fallback and cycle handling, provider
 adapters and error classification, credential resolution, hedging, guardrail
 redaction placement, rate-limit window semantics, cost math, token accounting,
-the SSE contract end-to-end, and each dependency's failure mode. 28 of them
-are the xfailed Anthropic spec. The MCP gateway has its own suite under
+the SSE contract end-to-end, and each dependency's failure mode. Another 28
+tests are expected failures documenting the unfinished Anthropic adapter. The MCP gateway has 9 passing tests under
 `services/mcp-gateway/tests`. They run against `fakeredis`, so no services
 need to be up. CI runs them on every push, alongside a build of all eight
 images.
@@ -341,8 +312,8 @@ Being explicit about what this does *not* do yet:
   survives a flush.
 - **No budget enforcement.** Spend is observed, never capped. Rate limiting is
   RPM only — there is no TPM limit.
-- **No response caching, retries, or deployment pools.** A route maps to exactly
-  one model at one URL.
+- **No LLM response caching or deployment pools.** A route maps to one model
+  endpoint; retryable failures can fall back to another route.
 - **Guardrails are regex-based.** A useful backstop, not a substitute for a real
   PII or prompt-injection engine.
 
@@ -367,3 +338,5 @@ safe to expose:
 ```bash
 make down    # stops and removes containers + volumes
 ```
+
+</details>
