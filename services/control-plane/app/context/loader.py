@@ -84,5 +84,5 @@ def _fetch_from_broker(url: str) -> List[Dict[str, Any]] | None:
             resp.raise_for_status()
             return resp.json()
     except Exception:
-        log.exception("context.fetch_failed", url=url)
+        log.exception("context.fetch_failed url=%s", url)
         return None

@@ -18,6 +18,10 @@ children: list[tuple[str, subprocess.Popen]] = []
 def start(name: str, directory: str, command: list[str], **extra_env: str) -> None:
     env = os.environ.copy()
     env.update(extra_env)
+    if directory == "broker":
+        # Control Plane uses BROKER_URL for HTTP, but Celery treats that legacy
+        # variable as its own broker URL and would try an HTTP transport.
+        env.pop("BROKER_URL", None)
     env["PYTHONPATH"] = str(ROOT / directory)
     process = subprocess.Popen(command, cwd=ROOT / directory, env=env, start_new_session=True)
     children.append((name, process))
