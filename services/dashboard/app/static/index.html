@@ -78,24 +78,87 @@ label{display:block;font-size:12px;color:var(--muted);margin-bottom:5px;font-wei
 .composer textarea{resize:vertical;min-height:50px}
 .meta{font-size:12px;color:var(--muted);display:flex;gap:14px;flex-wrap:wrap}
 .meta strong{color:var(--text)}
+/* overview */
+.hero{padding:34px;border-radius:16px;background:radial-gradient(circle at 90% 0,rgba(91,140,255,.25),transparent 35%),linear-gradient(135deg,#151c2c,#101522);border:1px solid var(--border);margin-bottom:20px}
+.eyebrow{color:#85a7ff;font-size:12px;font-weight:700;letter-spacing:1.4px;text-transform:uppercase;margin-bottom:8px}
+.hero h1{font-size:32px;line-height:1.15;max-width:660px;margin-bottom:12px}
+.hero p{color:var(--muted);font-size:15px;max-width:700px;margin-bottom:22px}
+.hero-actions{display:flex;gap:10px;flex-wrap:wrap}
+.overview-grid{display:grid;grid-template-columns:1.15fr .85fr;gap:16px;margin-bottom:16px}
+.section-card{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:20px}
+.section-title{font-size:14px;font-weight:700;margin-bottom:14px}
+.pipeline{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.node{background:var(--panel2);border:1px solid var(--border);border-radius:9px;padding:9px 11px;font-size:12px;font-weight:600}
+.arrow{color:var(--accent)}
+.health-list{display:grid;gap:9px}
+.health-row{display:flex;align-items:center;justify-content:space-between;color:var(--muted)}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--yellow);display:inline-block;margin-right:8px}
+.dot.healthy{background:var(--green);box-shadow:0 0 9px rgba(63,185,80,.55)}
+.dot.offline{background:var(--red)}
+.feature-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+.feature{background:var(--panel);border:1px solid var(--border);border-radius:11px;padding:16px;text-align:left;color:var(--text);width:100%;font-weight:400;transition:transform .15s ease,border-color .15s ease,background .15s ease}
+.feature:hover,.feature:focus-visible{transform:translateY(-2px);border-color:var(--accent);background:var(--panel2);outline:none}
+.feature-icon{font-size:20px;margin-bottom:8px}.feature strong{display:block;margin-bottom:3px}.feature span{font-size:12px;color:var(--muted)}
+.feature-link{display:block;color:#85a7ff!important;margin-top:10px;font-weight:600}
+.back-link{display:inline-flex;align-items:center;gap:6px;padding:5px 0;margin-bottom:14px;border:none;background:transparent;color:#85a7ff;font-weight:600}
+.back-link:hover,.back-link:focus-visible{border-color:transparent;color:#b3c7ff;text-decoration:underline;outline:none}
 /* misc */
 code{font-family:ui-monospace,monospace;background:var(--panel2);padding:1px 5px;border-radius:4px;font-size:13px}
+@media(max-width:760px){.overview-grid,.feature-grid,.cards{grid-template-columns:1fr}.fgrid{grid-template-columns:1fr}.hero h1{font-size:25px}nav{overflow:auto}.shell{padding:0 14px}}
 </style>
 </head>
 <body>
 <div class="shell">
   <header>
-    <div class="brand"><span>◆</span> AI Gateway</div>
+    <div class="brand"><span>◆</span> LLM Control Plane</div>
     <nav>
-      <button class="tab active" onclick="show('routes',this)">Routes</button>
+      <button class="tab active" onclick="show('overview',this)">Overview</button>
+      <button class="tab" onclick="show('routes',this)">Routes</button>
       <button class="tab" onclick="show('usage',this)">Usage</button>
       <button class="tab" onclick="show('playground',this)">Playground</button>
     </nav>
   </header>
   <main>
 
+    <!-- ── OVERVIEW ───────────────────────────────────────────────── -->
+    <div id="page-overview" class="page active">
+      <section class="hero">
+        <div class="eyebrow">Self-hosted AI infrastructure</div>
+        <h1>One control plane for models, tools, agents, and policy.</h1>
+        <p>An OpenAI-compatible gateway with semantic routing, rate limits, guardrails, cost tracking, MCP tool execution, and observable agent runs.</p>
+        <div class="hero-actions">
+          <button class="primary" data-page="playground">Try the playground</button>
+          <button data-page="routes">Manage routes</button>
+          <button data-page="usage">View live usage</button>
+        </div>
+      </section>
+      <div class="overview-grid">
+        <section class="section-card">
+          <div class="section-title">Request pipeline</div>
+          <div class="pipeline">
+            <span class="node">Client</span><span class="arrow">→</span>
+            <span class="node">Semantic router</span><span class="arrow">→</span>
+            <span class="node">Policy + guardrails</span><span class="arrow">→</span>
+            <span class="node">LLM / MCP</span><span class="arrow">→</span>
+            <span class="node">Trace + cost</span>
+          </div>
+        </section>
+        <section class="section-card">
+          <div class="section-title">Platform health <span id="health-count" style="float:right;color:var(--muted);font-weight:400">checking…</span></div>
+          <div class="health-list" id="health-list"><div class="health-row">Connecting to services…</div></div>
+        </section>
+      </div>
+      <div class="feature-grid">
+        <button class="feature" data-page="playground"><div class="feature-icon">⌁</div><strong>Smart routing</strong><span>Route by model name or classify intent automatically.</span><span class="feature-link">Open playground →</span></button>
+        <button class="feature" data-page="routes"><div class="feature-icon">◈</div><strong>Policy controls</strong><span>Rate limits, fallbacks, budgets, and streaming guardrails.</span><span class="feature-link">Manage routes →</span></button>
+        <button class="feature" data-page="playground"><div class="feature-icon">⚡</div><strong>MCP-ready agents</strong><span>Discover, route, cache, and govern tool calls.</span><span class="feature-link">Try a model →</span></button>
+        <button class="feature" data-page="usage"><div class="feature-icon">◎</div><strong>Observability</strong><span>Tokens, cost, percentiles, traces, and provider adapters.</span><span class="feature-link">View telemetry →</span></button>
+      </div>
+    </div>
+
     <!-- ── ROUTES ─────────────────────────────────────────────────── -->
-    <div id="page-routes" class="page active">
+    <div id="page-routes" class="page">
+      <button class="back-link" data-page="overview">← Back to overview</button>
       <div class="row">
         <div>
           <h1>Routes</h1>
@@ -124,9 +187,7 @@ code{font-family:ui-monospace,monospace;background:var(--panel2);padding:1px 5px
             <div class="field"><label>Provider</label>
               <select id="f-provider" onchange="providerChanged()">
                 <option value="ollama">ollama</option>
-                <option value="openai">openai</option>
-                <option value="anthropic">anthropic</option>
-                <option value="google">google</option>
+                <option value="openai_compatible">openai-compatible</option>
               </select>
             </div>
             <div class="field"><label>Model</label><input id="f-model" placeholder="llama3.2:1b"></div>
@@ -147,6 +208,7 @@ code{font-family:ui-monospace,monospace;background:var(--panel2);padding:1px 5px
 
     <!-- ── USAGE ──────────────────────────────────────────────────── -->
     <div id="page-usage" class="page">
+      <button class="back-link" data-page="overview">← Back to overview</button>
       <div class="row">
         <div>
           <h1>Usage</h1>
@@ -174,6 +236,7 @@ code{font-family:ui-monospace,monospace;background:var(--panel2);padding:1px 5px
 
     <!-- ── PLAYGROUND ─────────────────────────────────────────────── -->
     <div id="page-playground" class="page">
+      <button class="back-link" data-page="overview">← Back to overview</button>
       <h1>Playground</h1>
       <p class="sub">Chat through the gateway. Pick a route, or choose <code>auto</code> to let semantic routing decide.</p>
       <div class="chat-wrap panel" style="padding:18px">
@@ -211,9 +274,35 @@ function show(page, btn) {
   document.getElementById('page-' + page).classList.add('active');
   btn.classList.add('active');
   if (page === 'routes') loadRoutes();
+  if (page === 'overview') loadHealth();
   if (page === 'usage') { loadUsage(); startUsageTimer(); }
   else stopUsageTimer();
   if (page === 'playground') loadPgRoutes();
+}
+
+function openPage(page) {
+  const button = document.querySelector(`.tab[data-tab="${page}"]`);
+  if (button) show(page, button);
+}
+
+document.querySelectorAll('.tab').forEach(button => {
+  button.dataset.tab = button.textContent.trim().toLowerCase();
+});
+document.querySelectorAll('[data-page]').forEach(button => {
+  button.addEventListener('click', () => openPage(button.dataset.page));
+});
+
+async function loadHealth() {
+  const list = document.getElementById('health-list');
+  const count = document.getElementById('health-count');
+  try {
+    const data = await api('GET', '/api/health');
+    list.innerHTML = data.services.map(s => `<div class="health-row"><span><i class="dot ${esc(s.status)}"></i>${esc(s.name)}</span><span>${esc(s.status)}</span></div>`).join('');
+    count.textContent = `${data.healthy}/${data.services.length} healthy`;
+  } catch(e) {
+    list.innerHTML = '<div class="health-row"><span><i class="dot offline"></i>Health check unavailable</span></div>';
+    count.textContent = 'offline';
+  }
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -300,9 +389,8 @@ function providerChanged() {
   const p = document.getElementById('f-provider').value;
   const urlField = document.getElementById('f-base-url');
   if (p === 'ollama') urlField.value = 'http://ollama:11434';
-  else if (p === 'openai') urlField.value = 'https://api.openai.com';
-  else if (p === 'anthropic') urlField.value = 'https://api.anthropic.com';
-  else urlField.value = '';
+  else if (p === 'openai_compatible') urlField.value = 'https://api.openai.com/v1';
+  else urlField.value = 'http://ollama:11434';
 }
 
 async function submitCreate() {
@@ -452,7 +540,8 @@ async function pgSend() {
 }
 
 // ── init ──────────────────────────────────────────────────────────────────────
-loadRoutes();
+loadHealth();
+setInterval(loadHealth, 10000);
 </script>
 </body>
 </html>

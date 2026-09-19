@@ -45,6 +45,16 @@ def build_full_context() -> Dict[str, Any]:
     }
 
 
+def refresh_context() -> Dict[str, Any]:
+    """Invalidate all cached broker data, then fetch a coherent snapshot."""
+    for key in ("ctx:routes", "ctx:mcp_servers", "ctx:guardrails", "ctx:semantic_rules", "ctx:observability_configs"):
+        try:
+            _redis.delete(key)
+        except Exception:
+            log.warning("context.cache_invalidation_failed", key=key, exc_info=True)
+    return build_full_context()
+
+
 def invalidate(resource_type: str) -> None:
     key_map = {
         "route": "ctx:routes",

@@ -5,7 +5,7 @@ from prometheus_client import make_asgi_app
 
 from app.api.config import router as config_router
 from app.config import settings
-from app.context.loader import build_full_context
+from app.context.loader import refresh_context
 
 log = structlog.get_logger()
 
@@ -31,7 +31,7 @@ async def _context_refresh_loop():
     while True:
         await asyncio.sleep(settings.context_refresh_interval)
         try:
-            build_full_context()
+            refresh_context()
             log.info("control_plane.context_refreshed")
         except Exception:
             log.exception("control_plane.context_refresh_failed")

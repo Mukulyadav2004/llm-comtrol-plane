@@ -4,11 +4,11 @@
   "routes": [
     {% for route in routes if route.enabled %}
     {
-      "name": "{{ route.name }}",
-      "provider": "{{ route.provider }}",
-      "model": "{{ route.model }}",
-      "base_url": "{{ route.base_url or '' }}",
-      "api_key_env": {{ ('"' + route.api_key_env + '"') if route.api_key_env else 'null' }},
+      "name": {{ route.name | tojson }},
+      "provider": {{ route.provider | tojson }},
+      "model": {{ route.model | tojson }},
+      "base_url": {{ (route.base_url or '') | tojson }},
+      "api_key_env": {{ route.api_key_env | tojson if route.api_key_env else 'null' }},
       "provider_options": {{ (route.provider_options or {}) | tojson }},
       "policy": {
         "max_tokens": {{ route.max_tokens }},
@@ -16,7 +16,7 @@
         "rate_limit_rpm": {{ route.rate_limit_rpm }},
         "cost_per_1k_tokens": {{ route.cost_per_1k_tokens }}
       },
-      "fallback": {{ '"' + route.fallback_route_name + '"' if route.fallback_route_name else 'null' }},
+      "fallback": {{ route.fallback_route_name | tojson if route.fallback_route_name else 'null' }},
       "guardrail_ids": {{ route.guardrail_ids | tojson }}
     }{% if not loop.last %},{% endif %}
     {% endfor %}
@@ -24,12 +24,12 @@
   "guardrails": [
     {% for g in guardrails if g.enabled %}
     {
-      "id": "{{ g.id }}",
-      "name": "{{ g.name }}",
-      "type": "{{ g.guardrail_type }}",
+      "id": {{ g.id | tojson }},
+      "name": {{ g.name | tojson }},
+      "type": {{ g.guardrail_type | tojson }},
       "apply_on_input": {{ g.apply_on_input | lower }},
       "apply_on_output": {{ g.apply_on_output | lower }},
-      "action_on_violation": "{{ g.action_on_violation }}",
+      "action_on_violation": {{ g.action_on_violation | tojson }},
       "config": {{ g.config | tojson }}
     }{% if not loop.last %},{% endif %}
     {% endfor %}
@@ -37,8 +37,8 @@
   "mcp_servers": [
     {% for s in mcp_servers if s.enabled and s.healthy %}
     {
-      "name": "{{ s.name }}",
-      "endpoint_url": "{{ s.endpoint_url }}",
+      "name": {{ s.name | tojson }},
+      "endpoint_url": {{ s.endpoint_url | tojson }},
       "capabilities": {{ s.capabilities | tojson }},
       "tags": {{ s.tags | tojson }}
     }{% if not loop.last %},{% endif %}
@@ -47,8 +47,8 @@
   "semantic_rules": [
     {% for r in semantic_rules if r.enabled %}
     {
-      "intent": "{{ r.intent }}",
-      "route_name": "{{ r.route_name }}",
+      "intent": {{ r.intent | tojson }},
+      "route_name": {{ r.route_name | tojson }},
       "keyword_hints": {{ r.keyword_hints | tojson }},
       "priority": {{ r.priority }}
     }{% if not loop.last %},{% endif %}
@@ -57,13 +57,13 @@
   "observability_configs": [
     {% for o in observability_configs if o.enabled and o.provisioned %}
     {
-      "name": "{{ o.name }}",
-      "provider": "{{ o.provider }}",
-      "project_name": "{{ o.project_name }}",
-      "remote_project_id": {{ '"' + o.remote_project_id + '"' if o.remote_project_id else 'null' }},
+      "name": {{ o.name | tojson }},
+      "provider": {{ o.provider | tojson }},
+      "project_name": {{ o.project_name | tojson }},
+      "remote_project_id": {{ o.remote_project_id | tojson if o.remote_project_id else 'null' }},
       "credentials": {{ o.credentials | tojson }},
       "route_names": {{ o.route_names | tojson }},
-      "endpoint_url": {{ '"' + o.endpoint_url + '"' if o.endpoint_url else 'null' }},
+      "endpoint_url": {{ o.endpoint_url | tojson if o.endpoint_url else 'null' }},
       "enabled": {{ o.enabled | lower }},
       "provisioned": {{ o.provisioned | lower }}
     }{% if not loop.last %},{% endif %}

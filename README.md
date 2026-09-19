@@ -2,6 +2,19 @@
 
 A self-hosted AI gateway you run on your own infrastructure. Configure routes, guardrails, and tool integrations once — every request goes through a consistent pipeline with rate limiting, cost tracking, and tracing.
 
+## 90-second demo
+
+With Docker running, one command starts the platform, provisions a local LLM
+route and two MCP tool servers, then opens the dashboard:
+
+```bash
+make demo
+```
+
+Open **Overview** to see live service health, then use **Playground** to send a
+request through semantic routing. **Routes** shows the provisioned model and
+**Usage** shows token, cost, and latency telemetry after the request.
+
 ---
 
 ## How it works
@@ -169,7 +182,7 @@ export GROQ_API_KEY=gsk_...        # on the gateway container
 ```
 
 ```bash
-curl -X PUT localhost:8000/v2/service_instances/groq-fast \
+curl -X PUT localhost:18000/v2/service_instances/groq-fast \
   -H 'Content-Type: application/json' \
   -d '{"service_id":"llm-route","plan_id":"ollama-basic","instance_id":"groq-fast",
        "parameters":{"name":"groq-fast","provider":"openai_compatible",
@@ -183,7 +196,7 @@ change `base_url` and `api_key_env`.
 
 ---
 
-## Run it
+## Run it manually
 
 **Prerequisites:** Docker + Docker Compose, Make
 

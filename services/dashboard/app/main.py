@@ -1,4 +1,5 @@
-"""Tiny dashboard backend — serves the single-page UI and proxies to broker/gateway."""
+"""Dashboard backend — serves the UI and proxies to control-plane services."""
+import asyncio
 import os
 from pathlib import Path
 
@@ -9,6 +10,9 @@ from fastapi.staticfiles import StaticFiles
 
 BROKER = os.getenv("BROKER_URL", "http://broker:8000")
 GATEWAY = os.getenv("GATEWAY_URL", "http://gateway:8002")
+CONTROL_PLANE = os.getenv("CONTROL_PLANE_URL", "http://control-plane:8001")
+MCP_GATEWAY = os.getenv("MCP_GATEWAY_URL", "http://mcp-gateway:8005")
+AGENT_GATEWAY = os.getenv("AGENT_GATEWAY_URL", "http://agent-gateway:8004")
 
 app = FastAPI(docs_url=None, redoc_url=None)
 
@@ -18,6 +22,29 @@ _HTML = (Path(__file__).parent / "static" / "index.html").read_text()
 @app.get("/", response_class=HTMLResponse)
 async def index():
     return _HTML
+
+
+@app.get("/api/health")
+async def platform_health():
+    """Return a fast, dashboard-friendly health snapshot for the demo landing page."""
+    services = {
+        "Broker": BROKER,
+        "Control Plane": CONTROL_PLANE,
+        "LLM Gateway": GATEWAY,
+        "MCP Gateway": MCP_GATEWAY,
+        "Agent Gateway": AGENT_GATEWAY,
+    }
+
+    async def probe(client: httpx.AsyncClient, name: str, base_url: str):
+        try:
+            response = await client.get(f"{base_url}/health")
+            return {"name": name, "status": "healthy" if response.is_success else "degraded"}
+        except Exception:
+            return {"name": name, "status": "offline"}
+
+    async with httpx.AsyncClient(timeout=2) as client:
+        results = await asyncio.gather(*(probe(client, name, url) for name, url in services.items()))
+    return {"services": results, "healthy": sum(item["status"] == "healthy" for item in results)}
 
 
 # ── Routes (proxy to broker) ──────────────────────────────────────────────────
