@@ -1,4 +1,5 @@
 """Config distribution API — gateway polls this to get its current routing config."""
+import json
 import time
 from typing import Any, Dict
 
@@ -10,6 +11,7 @@ from app.templates.renderer import render_gateway_config, render_mcp_registry
 router = APIRouter(tags=["config"])
 
 _version_counter = int(time.time())
+_last_content: Dict[str, str] = {}
 
 
 def _next_version() -> int:
@@ -18,15 +20,27 @@ def _next_version() -> int:
     return _version_counter
 
 
+def _version_for_content(kind: str, config: Dict[str, Any]) -> Dict[str, Any]:
+    """Change the version when Broker data changes, even if a reload signal was missed."""
+    fingerprint = json.dumps(
+        {k: v for k, v in config.items() if k not in ("version", "generated_at")},
+        sort_keys=True,
+    )
+    if _last_content.get(kind) != fingerprint:
+        _last_content[kind] = fingerprint
+        config["version"] = str(_next_version())
+    return config
+
+
 @router.get("/config/gateway")
 async def get_gateway_config() -> Dict[str, Any]:
     """Gateway polls this on startup and after reload signals."""
-    return render_gateway_config(version=_version_counter)
+    return _version_for_content("gateway", render_gateway_config(version=_version_counter))
 
 
 @router.get("/config/mcp")
 async def get_mcp_config() -> Dict[str, Any]:
-    return render_mcp_registry(version=_version_counter)
+    return _version_for_content("mcp", render_mcp_registry(version=_version_counter))
 
 
 @router.post("/internal/reload")

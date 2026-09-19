@@ -72,11 +72,12 @@ def _cached_fetch(cache_key: str, url: str) -> List[Dict[str, Any]]:
     if cached:
         return json.loads(cached)
     data = _fetch_from_broker(url)
-    _redis.setex(cache_key, _CACHE_TTL, json.dumps(data))
-    return data
+    if data is not None:
+        _redis.setex(cache_key, _CACHE_TTL, json.dumps(data))
+    return data or []
 
 
-def _fetch_from_broker(url: str) -> List[Dict[str, Any]]:
+def _fetch_from_broker(url: str) -> List[Dict[str, Any]] | None:
     try:
         with httpx.Client(timeout=5) as client:
             resp = client.get(url)
@@ -84,4 +85,4 @@ def _fetch_from_broker(url: str) -> List[Dict[str, Any]]:
             return resp.json()
     except Exception:
         log.exception("context.fetch_failed", url=url)
-        return []
+        return None

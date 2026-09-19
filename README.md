@@ -6,6 +6,8 @@ A self-hostable AI gateway that gives applications one OpenAI-compatible API for
 
 **At a glance:** Python · FastAPI · Docker · PostgreSQL · Redis · Celery · OpenAI-compatible API · MCP · Prometheus
 
+**Deploying?** See the [Railway setup and live deployment status](docs/railway.md).
+
 ## 90-second demo
 
 With Docker running, one command starts the platform, provisions a local LLM
