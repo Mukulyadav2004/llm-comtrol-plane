@@ -5,11 +5,10 @@ public URL belongs to **dashboard only**; everything else uses Railway private
 networking. The local Ollama container is intentionally omitted on Railway.
 The hosted demo uses Groq's OpenAI-compatible API instead.
 
-**Live dashboard:** https://dashboard-production-b92cb.up.railway.app — HTTP
-Basic Auth is enabled. The `demo` username and password are held privately by
-the owner, not committed to this repository. On 19 September 2026, all five
-dashboard health checks, a Groq chat request, Usage telemetry, and both MCP
-server registrations were verified on this deployment.
+**Live dashboard:** https://dashboard-production-b92cb.up.railway.app — public
+access is enabled with no login. On 19 September 2026, all five dashboard
+health checks, a Groq chat request, Usage telemetry, and both MCP server
+registrations were verified on this deployment.
 
 ## Trial deployment (five-service limit)
 
